@@ -3,6 +3,24 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.3.1 — 2026-10-17
+
+### Fixed
+- **Installing mods failed** with "GameBanana error: INPUT_ERRORS" / HTTP 400. The
+  mod details request asked for two fields GameBanana doesn't accept. It now
+  uses the full profile endpoint, the same one Deadlock Mod Manager uses.
+- **Sorting while searching.** GameBanana's search ignores the sort order, so
+  Sapphire now sorts search results itself by the chosen option (most liked,
+  most viewed, newest, recently updated). Plain browsing was already sorted by
+  the server.
+
+### Added
+- **Check for updates** now shows a popup listing the mods with updates (with an
+  Update all button), or confirms everything is current.
+- **Clear all data** in Settings → Game files: removes every mod and profile
+  from Sapphire and the game for a fresh start. Settings and the Deadlock folder
+  are kept.
+
 ## 1.3.0 — 2026-10-17
 
 ### Added

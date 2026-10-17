@@ -158,6 +158,7 @@ class SettingsPage(QWidget):
     import_requested = Signal(str)
     app_update_requested = Signal()
     appearance_changed = Signal()
+    clear_requested = Signal()
 
     def __init__(self, manager):
         super().__init__()
@@ -255,10 +256,16 @@ class SettingsPage(QWidget):
         reset = QPushButton("Turn everything off and restore the game")
         reset.setProperty("kind", "danger")
         reset.clicked.connect(self.reset_requested)
+        clear = QPushButton("Clear all data")
+        clear.setProperty("kind", "danger")
+        clear.setToolTip("Delete every installed mod and profile from Sapphire and the game, for a fresh start. "
+                         "Settings and the Deadlock folder are kept.")
+        clear.clicked.connect(self.clear_requested)
         g.addWidget(fix)
         g.addWidget(addons)
         g.addStretch(1)
         g.addWidget(reset)
+        g.addWidget(clear)
         root.addLayout(g)
 
         root.addWidget(_section("Switching from another mod manager"))

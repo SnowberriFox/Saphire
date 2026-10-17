@@ -354,3 +354,42 @@ def test_state_survives_restart(setup):
     lib3 = Library()
     assert lib3.mods == {}
     assert list(lib2.path.parent.glob("state.broken-*.json"))
+
+
+def test_details_uses_profilepage_and_files_uses_slim_query(monkeypatch):
+    c = GameBananaClient()
+    seen = []
+
+    def fake_get(path, params=None, ttl=0):
+        seen.append((path, params))
+        if path.endswith("/ProfilePage"):
+            return {"_idRow": 5, "_sName": "X", "_sText": "<p>hi</p>", "_aGame": {"_idRow": 20948},
+                    "_aSuperCategory": {"_sName": "Skins"}, "_aCategory": {"_sName": "Haze"},
+                    "_aFiles": [{"_idRow": 2, "_sFile": "new.zip", "_tsDateAdded": 20}],
+                    "_aArchivedFiles": [{"_idRow": 1, "_sFile": "old.zip", "_tsDateAdded": 10}]}
+        return {"_idRow": 5, "_aFiles": [{"_idRow": 2, "_sFile": "new.zip", "_bIsArchived": False},
+                                          {"_idRow": 1, "_sFile": "old.zip", "_bIsArchived": True}]}
+    monkeypatch.setattr(c, "_get", fake_get)
+    d = c.details("Mod", 5)
+    assert seen[0][0] == "Mod/5/ProfilePage" and seen[0][1] is None
+    assert d.submission.category_label == "Skins › Haze"
+    assert [(f.id, f.archived) for f in d.files] == [(2, False), (1, True)]
+    fs = c.files("Mod", 5)
+    assert seen[1] == ("Mod/5", {"_csvProperties": "_idRow,_aFiles"})
+    assert [(f.id, f.archived) for f in fs] == [(2, False), (1, True)]
+    from sapphire.gamebanana import newest_file
+    assert newest_file(fs).id == 2
+
+
+def test_clear_all_data(setup):
+    mgr, game, _, _ = setup
+    mgr.install_gamebanana("Mod", 1)
+    mgr.save_profile("p")
+    mgr.apply()
+    assert addons(game) and mgr.lib.profiles
+    assert mgr.clear_all_data() == 1
+    assert mgr.lib.mods == {} and mgr.lib.profiles == {} and addons(game) == []
+    assert not gameinfo.inspect(gameinfo.read(game)).patched
+    from sapphire import paths
+    assert list(paths.library_dir().iterdir()) == []
+    mgr.lib.game_dir == str(game)

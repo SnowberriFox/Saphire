@@ -355,6 +355,35 @@ class Manager:
             gameinfo.apply(self.game_dir, [], paths.data_dir() / "backups")
             self._dirty = False
 
+    def clear_all_data(self) -> int:
+        """Remove every mod, profile and deployed file; keep settings and the game folder.
+        Returns how many mods were removed."""
+        with self.lock:
+            if steam.is_game_running():
+                raise GameRunning()
+            n = len(self.lib.mods)
+            try:
+                citadel = self.citadel()
+                _, record = deploy.deploy(citadel, [], self.lib.deployed)
+                gameinfo.apply(self.game_dir, [], paths.data_dir() / "backups")
+            except NoGame:
+                record = {}
+            self.lib.deployed = record
+            self.lib.mods.clear()
+            self.lib.order.clear()
+            self.lib.profiles.clear()
+            self.lib.active_profile = None
+            self.lib.save()
+            lib = paths.library_dir()
+            for entry in lib.iterdir():
+                shutil.rmtree(entry, ignore_errors=True) if entry.is_dir() else entry.unlink(missing_ok=True)
+            for f in paths.downloads_dir().iterdir():
+                if f.is_file():
+                    f.unlink(missing_ok=True)
+            self._dirty = False
+            log.info("cleared all data (%d mods)", n)
+            return n
+
     def launch(self) -> None:
         if not steam.is_game_running():
             if self._dirty or self.gameinfo_needs_fix():

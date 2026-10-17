@@ -126,6 +126,7 @@ class MainWindow(QMainWindow):
         self.settings.apply_now.connect(self.request_apply)
         self.settings.fix_gameinfo.connect(lambda: self.check_gameinfo(manual=True))
         self.settings.reset_requested.connect(self.reset_vanilla)
+        self.settings.clear_requested.connect(self.clear_all)
         self.settings.setup_requested.connect(self.run_setup)
         self.settings.import_requested.connect(self.import_from)
         self.settings.app_update_requested.connect(lambda: self.check_app_update(manual=True))
@@ -424,6 +425,23 @@ class MainWindow(QMainWindow):
             return
         self._library_changed()
         self.say("Game restored. All mods are off.")
+
+    def clear_all(self):
+        n = len(self.mgr.lib.mods)
+        if not confirm(self, "Clear all data",
+                       f"Delete all {n} installed mod{'s' if n != 1 else ''} and every profile from Sapphire and "
+                       "from the game? This can't be undone. You can re-add mods from Browse afterwards. "
+                       "Settings and your Deadlock folder are kept.",
+                       "Delete everything", danger=True):
+            return
+        try:
+            self.mgr.clear_all_data()
+        except Exception as exc:  # noqa: BLE001
+            error(self, "Couldn't clear data", str(exc))
+            return
+        self._library_changed()
+        self.profiles.reload()
+        self.say("All mods and profiles removed. Fresh start.")
 
     def launch(self):
         self.launch_btn.setEnabled(False)
@@ -734,10 +752,31 @@ class MainWindow(QMainWindow):
             self.installed.check_btn.setEnabled(True)
             self.installed.check_btn.setText("Check for updates")
             self._library_changed()
+            n_checked = sum(1 for m in self.mgr.lib.mods.values() if m.source == "gamebanana" and m.gb_id)
             if found:
                 self.say(f"{len(found)} update{'s' if len(found) != 1 else ''} available. See Installed.", 15000)
             elif manual:
                 self.say("Everything is up to date.")
+            if manual:
+                box = QMessageBox(self)
+                box.setWindowTitle("Mod updates")
+                if found:
+                    names = "\n".join(f"• {m.name}" for m in found[:15])
+                    if len(found) > 15:
+                        names += f"\n• … and {len(found) - 15} more"
+                    box.setText(f"{len(found)} of {n_checked} mod{'s' if n_checked != 1 else ''} "
+                                f"{'have' if len(found) != 1 else 'has'} an update:\n\n{names}")
+                    upd = box.addButton("Update all", QMessageBox.AcceptRole)
+                    box.addButton("Later", QMessageBox.RejectRole)
+                    box.exec()
+                    if box.clickedButton() is upd:
+                        self.update_all()
+                else:
+                    box.setText(f"All {n_checked} mod{'s' if n_checked != 1 else ''} are up to date."
+                                if n_checked else "No GameBanana mods to check. Mods added from files can't be "
+                                                   "checked until they're identified.")
+                    box.addButton("OK", QMessageBox.AcceptRole)
+                    box.exec()
 
         def failed(exc):
             self.installed.check_btn.setEnabled(True)

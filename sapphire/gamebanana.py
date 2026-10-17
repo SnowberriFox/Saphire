@@ -39,13 +39,6 @@ LIST_FIELDS = ",".join([
     "_bIsObsolete", "_bHasContentRatings", "_aSubmitter", "_aPreviewMedia", "_aGame",
     "_aRootCategory", "_aSubCategory", "_sVersion",
 ])
-DETAIL_FIELDS = ",".join([
-    "_idRow", "_sName", "_sText", "_sProfileUrl", "_tsDateAdded", "_tsDateModified",
-    "_nLikeCount", "_nViewCount", "_nDownloadCount", "_bIsNsfw", "_bHasContentRatings",
-    "_aSubmitter", "_aPreviewMedia", "_aGame", "_aCategory", "_aFiles", "_aArchivedFiles",
-    "_sVersion", "_bIsObsolete",
-])
-
 URL_RE = re.compile(r"gamebanana\.com/(mods|sounds)/(?:[a-z]+/)?(\d+)", re.IGNORECASE)
 
 
@@ -154,7 +147,7 @@ def _images(media) -> tuple[str, list[str]]:
 def parse_submission(raw: dict, model: str = "Mod") -> Submission:
     thumb, images = _images(raw.get("_aPreviewMedia"))
     submitter = raw.get("_aSubmitter") or {}
-    root = raw.get("_aRootCategory") or {}
+    root = raw.get("_aRootCategory") or raw.get("_aSuperCategory") or {}
     sub = raw.get("_aSubCategory") or raw.get("_aCategory") or {}
     return Submission(
         id=int(raw.get("_idRow") or 0),
@@ -334,12 +327,16 @@ class GameBananaClient:
         return [parse_category(c) for c in raw]
 
     def details(self, model: str, mod_id: int) -> Details:
-        data = self._get(f"{model}/{int(mod_id)}", {"_csvProperties": DETAIL_FIELDS}, ttl=60)
+        # ProfilePage returns the whole record (files, archived files, text, categories).
+        # The field-picking form (?_csvProperties=...) rejects several names, so avoid it here.
+        data = self._get(f"{model}/{int(mod_id)}/ProfilePage", ttl=60)
         if not isinstance(data, dict):
             raise GameBananaError("Unexpected response for mod details")
         game = data.get("_aGame")
         if isinstance(game, dict) and game.get("_idRow") and int(game["_idRow"]) != GAME_ID:
             raise GameBananaError("That isn't a Deadlock mod.")
+        if data.get("_bIsTrashed") or data.get("_bIsWithheld"):
+            raise GameBananaError("This mod has been removed from GameBanana.")
         sub = parse_submission(data, model)
         files = [parse_file(f) for f in data.get("_aFiles") or [] if isinstance(f, dict)]
         files += [parse_file(f, archived=True) for f in data.get("_aArchivedFiles") or []
@@ -348,12 +345,11 @@ class GameBananaClient:
         return Details(submission=sub, text_html=data.get("_sText") or "", files=files)
 
     def files(self, model: str, mod_id: int) -> list[GBFile]:
-        data = self._get(f"{model}/{int(mod_id)}",
-                         {"_csvProperties": "_idRow,_aFiles,_aArchivedFiles,_tsDateModified"}, ttl=30)
-        files = [parse_file(f) for f in data.get("_aFiles") or [] if isinstance(f, dict)]
-        files += [parse_file(f, archived=True) for f in data.get("_aArchivedFiles") or []
-                  if isinstance(f, dict)]
-        return files
+        """Just the file list (archived ones flagged). Cheap, used by update checks."""
+        data = self._get(f"{model}/{int(mod_id)}", {"_csvProperties": "_idRow,_aFiles"}, ttl=30)
+        if not isinstance(data, dict):
+            raise GameBananaError("Unexpected response for mod files")
+        return [parse_file(f) for f in data.get("_aFiles") or [] if isinstance(f, dict)]
 
     # -- downloading -------------------------------------------------------------
     def download(self, file: GBFile, dest_dir: Path,

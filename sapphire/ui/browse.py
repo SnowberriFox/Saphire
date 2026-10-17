@@ -70,10 +70,16 @@ class SubmissionModel(QAbstractListModel):
         self.items = []
         self.endResetModel()
 
-    def extend(self, subs: list[Submission]):
+    def extend(self, subs: list[Submission], sort_key=None):
         known = {s.key for s in self.items}
         subs = [s for s in subs if s.key not in known]
         if not subs:
+            return
+        if sort_key is not None:
+            # Re-sort everything loaded so far (used for search, which the server won't sort).
+            self.beginResetModel()
+            self.items = sorted(self.items + subs, key=sort_key)
+            self.endResetModel()
             return
         self.beginInsertRows(QModelIndex(), len(self.items), len(self.items) + len(subs) - 1)
         self.items.extend(subs)
@@ -908,7 +914,12 @@ class BrowsePage(QWidget):
             items = [s for s in items if not s.obsolete]
         if self.filters.hide_installed.isChecked():
             items = [s for s in items if not self.mgr.lib.by_gb(s.model, s.id)]
-        self.model.extend(items)
+        sort_key = None
+        if self.filters.search.text().strip():
+            key = self.filters.sort.currentData()
+            sort_key = {"popular": lambda s: -s.likes, "views": lambda s: -s.views,
+                        "newest": lambda s: -s.date_added, "updated": lambda s: -s.date_modified}.get(key)
+        self.model.extend(items, sort_key)
         self._shown = len(self.model.items)
         self._complete = page.complete or raw_count == 0 or page.page * self.per_page >= page.total
         noun = "sounds" if self.filters.model == "Sound" else "mods"
