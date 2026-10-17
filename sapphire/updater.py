@@ -63,8 +63,8 @@ def parse_version(text: str) -> tuple[int, ...]:
     return tuple(int(x) for x in m.groups() if x is not None)
 
 
-def is_newer(candidate: str, current: str = __version__) -> bool:
-    return parse_version(candidate) > parse_version(current)
+def is_newer(candidate: str, current: str | None = None) -> bool:
+    return parse_version(candidate) > parse_version(current or __version__)
 
 
 def running_from_source() -> bool:
