@@ -260,7 +260,35 @@ def main():
 
     def settings():
         win.go(3)
-        QTimer.singleShot(400, lambda: (shot("5-settings"), importdlg()))
+        QTimer.singleShot(400, lambda: (shot("5-settings"), listview()))
+
+    def listview():
+        win.go(0)
+        win.browse.view_group.button(1).setChecked(True)
+        QTimer.singleShot(800, lambda: (shot("8-browse-list"), themed()))
+
+    def themed():
+        mgr.lib.settings.theme_preset = "Amber Hand"
+        mgr.lib.settings.ui_scale = "Large"
+        win.apply_appearance()
+        win.go(1)
+        QTimer.singleShot(800, lambda: (shot("9-amber-large"), parchment()))
+
+    def parchment():
+        mgr.lib.settings.theme_preset = "Parchment"
+        mgr.lib.settings.theme_colors = {"accent": "#B5423A"}
+        mgr.lib.settings.ui_scale = "Normal"
+        win.apply_appearance()
+        win.go(3)
+        win.settings._refresh_swatches()
+        QTimer.singleShot(800, lambda: (shot("10-parchment-settings"), restore_theme()))
+
+    def restore_theme():
+        mgr.lib.settings.theme_preset = "Sapphire"
+        mgr.lib.settings.theme_colors = {}
+        win.apply_appearance()
+        win.browse.view_group.button(0).setChecked(True)
+        importdlg()
 
     def importdlg():
         from sapphire.ui.importing import ImportDialog

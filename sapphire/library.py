@@ -90,6 +90,7 @@ class Profile:
     name: str
     entries: list[tuple[str, bool]] = field(default_factory=list)  # (uid, enabled) in load order
     saved_at: int = 0
+    origin: str = ""   # "" = made here; otherwise the manager it was imported from
 
 
 @dataclass
@@ -100,6 +101,10 @@ class Settings:
     auto_apply: bool = True
     per_page: int = 30
     onboarded: bool = False
+    view_mode: str = "grid"          # Browse: "grid" or "list"
+    ui_scale: str = "Normal"         # see theme.SCALES
+    theme_preset: str = "Sapphire"   # see theme.PRESETS
+    theme_colors: dict = field(default_factory=dict)   # token -> hex overrides
 
 
 class Library:
@@ -132,6 +137,8 @@ class Library:
         self.game_dir = data.get("game_dir")
         s = data.get("settings") or {}
         self.settings = Settings(**{k: v for k, v in s.items() if k in Settings.__dataclass_fields__})
+        if not isinstance(self.settings.theme_colors, dict):
+            self.settings.theme_colors = {}
         for uid, raw in (data.get("mods") or {}).items():
             try:
                 self.mods[uid] = InstalledMod.from_dict(raw)
@@ -143,6 +150,7 @@ class Library:
                 self.order.append(uid)
         for name, raw in (data.get("profiles") or {}).items():
             self.profiles[name] = Profile(name=name, saved_at=raw.get("saved_at", 0),
+                                          origin=str(raw.get("origin") or ""),
                                           entries=[(u, bool(e)) for u, e in raw.get("entries", [])])
         self.active_profile = data.get("active_profile")
         self.deployed = data.get("deployed") or {}
@@ -154,7 +162,7 @@ class Library:
             "settings": asdict(self.settings),
             "mods": {uid: asdict(m) for uid, m in self.mods.items()},
             "order": self.order,
-            "profiles": {n: {"entries": [list(e) for e in p.entries], "saved_at": p.saved_at}
+            "profiles": {n: {"entries": [list(e) for e in p.entries], "saved_at": p.saved_at, "origin": p.origin}
                          for n, p in self.profiles.items()},
             "active_profile": self.active_profile,
             "deployed": self.deployed,

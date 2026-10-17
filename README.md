@@ -47,6 +47,9 @@ To uninstall: `./uninstall.sh` (keeps your mod library) or `./uninstall.sh --pur
 - **First run**: a short setup wizard confirms the third-party content notice, finds
   Deadlock, offers to import mods you already have, and checks GameBanana is
   reachable. Run it again any time from Settings.
+- **Appearance**: Settings → Appearance has six colour themes, a colour picker for
+  every part of the interface, and four interface sizes. Browse has a Grid/List
+  toggle.
 - **Browse**: live GameBanana catalogue. Filter by category or hero (type to find
   one), sort, search, switch between mods and sounds, hide 18+, outdated or
   already-installed mods. Click an author's name to see everything they've made.
@@ -56,6 +59,8 @@ To uninstall: `./uninstall.sh` (keeps your mod library) or `./uninstall.sh --pur
   side panel lists the exact files. Tick boxes turn mods on and off.
 - **Profiles**: save a setup (which mods are on plus their order) and switch in one
   click.
+- **Reapply** (Installed page): turns every mod off and back on by rewriting the
+  whole addons folder, for when something looks wrong in game.
 - **Launch Deadlock**: applies everything, double-checks `gameinfo.gi`, then
   starts the game through Steam.
 
@@ -137,7 +142,7 @@ Code map:
 | `sapphire/importers.py` | Reads Deadlock Mod Manager and Grimoire data into an import plan |
 | `sapphire/core.py` | The manager: install, update, apply, profiles, import, identify |
 | `sapphire/updater.py` | Checks GitHub for a newer Sapphire and installs it in place |
-| `sapphire/ui/` | The Qt interface (`onboarding.py` is the first-run wizard) |
+| `sapphire/ui/` | The Qt interface (`onboarding.py` is the first-run wizard, `theme.py` the themes) |
 
 Data lives in `~/.local/share/sapphire` (`SAPPHIRE_HOME` overrides it, handy for
 testing). Set `SAPPHIRE_DEBUG=1` for verbose logs in the terminal.

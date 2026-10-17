@@ -85,9 +85,9 @@ def test_check_is_rate_limited(monkeypatch):
     u = updater.Updater(s)
     u.check()
     u.check()
-    assert len([c for c in s.calls if "raw.github" in c]) == 1
+    assert len([c for c in s.calls if "__init__" in c]) == 1
     u.check(force=True)
-    assert len([c for c in s.calls if "raw.github" in c]) == 2
+    assert len([c for c in s.calls if "__init__" in c]) == 2
 
 
 def make_tarball(top: str) -> bytes:
@@ -146,3 +146,20 @@ def test_install_reports_uv_failure(tmp_path, monkeypatch):
     s = FakeSession({"https://x": FakeResp(200, body)})
     with pytest.raises(updater.UpdateError, match="boom"):
         updater.Updater(s).install(updater.Release("1.2.0", "https://x"))
+
+
+def test_changelog_section():
+    text = "# Changelog\n\n## 1.3.0 — 2026-10-17\n\n### Added\n- Themes\n\n## 1.2.0 — 2026-10-17\n\n- Updater\n"
+    assert updater.changelog_section(text, "1.3.0") == "### Added\n- Themes"
+    assert updater.changelog_section(text, "1.2.0") == "- Updater"
+    assert updater.changelog_section(text, "9.9.9") == ""
+
+
+def test_branch_check_reads_changelog(monkeypatch):
+    monkeypatch.setattr(updater, "__version__", "1.0.0")
+    s = FakeSession({"https://raw.githubusercontent.com/SnowberriFox/Saphire/main/sapphire/__init__.py":
+                     FakeResp(200, '__version__ = "1.3.0"'),
+                     "https://raw.githubusercontent.com/SnowberriFox/Saphire/main/CHANGELOG.md":
+                     FakeResp(200, "## 1.3.0 — today\n- Shiny\n\n## 1.2.0\n- Old")})
+    rel = updater.Updater(s).check(force=True)
+    assert rel.version == "1.3.0" and rel.notes == "- Shiny" and rel.url.endswith("CHANGELOG.md")

@@ -301,7 +301,8 @@ class Manager:
             self._dirty = True
 
     # ------------------------------------------------------------------- apply
-    def apply(self) -> deploy.DeployResult:
+    def apply(self, force: bool = False) -> deploy.DeployResult:
+        """Make the game match the library. `force` rewrites every file even if it looks right."""
         with self.lock:
             if steam.is_game_running():
                 self._dirty = True
@@ -309,7 +310,7 @@ class Manager:
             citadel = self.citadel()
             self.import_unmanaged()
             placements = deploy.plan(self.lib.ordered())
-            result, record = deploy.deploy(citadel, placements, self.lib.deployed)
+            result, record = deploy.deploy(citadel, placements, self.lib.deployed, force=force)
             self.lib.deployed = record
             self.lib.save()
             folders = [f"citadel/{f}" for f in result.folders or []]
@@ -528,10 +529,34 @@ class Manager:
         return importers.read_grimoire(gd, exclude=set(self.lib.deployed))
 
     def run_import(self, plan: importers.ImportPlan, choose: Chooser | None = None,
-                   progress: Progress | None = None, cancel: threading.Event | None = None) -> dict:
-        """Adopt a plan's mods and profiles. Returns counts for the summary."""
+                   progress: Progress | None = None, cancel: threading.Event | None = None,
+                   profiles_only: bool = False) -> dict:
+        """Adopt a plan's mods and profiles. Returns counts for the summary.
+
+        profiles_only: don't touch mods; just (re)create the plan's profiles using
+        mods already in the library (matched by GameBanana id, then by file name)."""
         imported: dict[str, str] = {}   # plan key -> uid
         downloaded = failed = 0
+        if profiles_only:
+            by_file = {}
+            for mod in self.lib.mods.values():
+                for v in mod.vpks:
+                    by_file.setdefault(Path(v.label).name.lower(), mod.uid)
+                by_file.setdefault(mod.file_name.lower(), mod.uid)
+            for m in plan.mods:
+                if m.gb_id and m.uid in self.lib.mods:
+                    imported[m.key] = m.uid
+                else:
+                    for v in m.vpks:
+                        hit = by_file.get(v.main.name.lower()) or by_file.get(Path(v.label).name.lower())
+                        if hit:
+                            imported[m.key] = hit
+                            break
+            with self.lock:
+                n = self._import_profiles(plan, imported)
+                self.lib.save()
+            return {"imported": 0, "downloaded": 0, "failed": 0, "profiles": n,
+                    "unmatched": sum(1 for m in plan.mods if m.key not in imported)}
         for i, m in enumerate(plan.mods):
             if cancel is not None and cancel.is_set():
                 raise Cancelled()
@@ -588,18 +613,33 @@ class Manager:
             # Imported mods take the plan's order, on top of anything already here.
             ordered = [imported[m.key] for m in plan.mods if m.key in imported]
             self.lib.set_order(ordered + [u for u in self.lib.order if u not in ordered])
-            for prof in plan.profiles:
-                entries = [(imported[k], on) for k, on in prof.entries if k in imported]
-                if not entries:
-                    continue
-                name = prof.name
-                if name in self.lib.profiles:
-                    name = f"{name} ({plan.source})"
-                self.lib.profiles[name] = Profile(name=name, entries=entries, saved_at=int(time.time()))
+            n_prof = self._import_profiles(plan, imported)
             self.lib.save()
             self._dirty = True
-        return {"imported": len(imported), "downloaded": downloaded, "failed": failed,
-                "profiles": sum(1 for p in plan.profiles if any(k in imported for k, _ in p.entries))}
+        return {"imported": len(imported), "downloaded": downloaded, "failed": failed, "profiles": n_prof}
+
+    def _import_profiles(self, plan: importers.ImportPlan, imported: dict[str, str]) -> int:
+        """Create the plan's profiles. A profile imported earlier from the same manager
+        with the same name is refreshed; one you made yourself is left alone."""
+        n = 0
+        for prof in plan.profiles:
+            entries: list[tuple[str, bool]] = []
+            seen: set[str] = set()
+            for k, on in prof.entries:
+                uid = imported.get(k)
+                if uid and uid not in seen:
+                    seen.add(uid)
+                    entries.append((uid, on))
+            if not entries:
+                continue
+            name = prof.name
+            existing = self.lib.profiles.get(name)
+            if existing and existing.origin != plan.source:
+                name = f"{name} ({plan.source})"
+            self.lib.profiles[name] = Profile(name=name, entries=entries, saved_at=int(time.time()),
+                                              origin=plan.source)
+            n += 1
+        return n
 
     def _adopt_import(self, m: importers.ImportMod) -> str:
         sets = [VpkSet(main=v.main, chunks=list(v.chunks), rel=v.label) for v in m.vpks]

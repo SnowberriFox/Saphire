@@ -333,3 +333,41 @@ def test_identify_drops_duplicate_of_known_mod(tmp_path, no7z, monkeypatch):
     monkeypatch.setattr(mgr.identifier.session, "post", lambda *a, **k: R())
     mgr.identify()
     assert dup_uid not in mgr.lib.mods and list(mgr.lib.mods) == ["gb-Mod-777"]
+
+
+def test_profiles_only_import_and_refresh(tmp_path, no7z):
+    home = tmp_path / "home"
+    game = make_game(tmp_path / "lib")
+    make_grimoire(home, game)
+    mgr = Manager(Library(), FakeGB({}, {}, {}))
+    mgr.set_game_dir(game)
+    mgr.apply()                     # adopts Grimoire's live files with their ids, no profiles yet
+    assert mgr.lib.profiles == {}
+    plan = mgr.plan_import("grimoire")
+    res = mgr.run_import(plan, profiles_only=True)
+    assert res["profiles"] == 1 and res["imported"] == 0
+    prof = mgr.lib.profiles["Everything"]
+    assert prof.origin == "Grimoire"
+    assert [u for u, _ in prof.entries] == ["gb-Mod-222", "gb-Mod-111"]   # old_skin isn't installed -> skipped
+    assert res["unmatched"] == 1
+    # the user makes their own profile with a clashing name; a re-import must not clobber it
+    mgr.save_profile("Everything")
+    assert mgr.lib.profiles["Everything"].origin == ""
+    mgr.run_import(plan, profiles_only=True)
+    assert set(mgr.lib.profiles) == {"Everything", "Everything (Grimoire)"}
+    # but re-importing again refreshes the imported one in place
+    mgr.run_import(plan, profiles_only=True)
+    assert set(mgr.lib.profiles) == {"Everything", "Everything (Grimoire)"}
+
+
+def test_force_apply_rewrites_everything(tmp_path, no7z):
+    game = make_game(tmp_path / "lib")
+    mgr = Manager(Library(), FakeGB({}, {}, {}))
+    mgr.set_game_dir(game)
+    mgr.install_local(make_vpk(tmp_path / "a.vpk", {"a": b"1"}))
+    mgr.install_local(make_vpk(tmp_path / "b.vpk", {"b": b"2"}))
+    assert mgr.apply().written == 2
+    assert mgr.apply().written == 0
+    res = mgr.apply(force=True)
+    assert res.written == 2 and res.removed == 0
+    assert mgr.apply().written == 0

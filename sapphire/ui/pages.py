@@ -6,8 +6,10 @@ import datetime as dt
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-                               QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget)
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QFileDialog, QFrame, QGridLayout,
+                               QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
+                               QVBoxLayout, QWidget)
 
 from sapphire import __version__, paths, steam
 from sapphire.ui import theme
@@ -155,6 +157,7 @@ class SettingsPage(QWidget):
     setup_requested = Signal()
     import_requested = Signal(str)
     app_update_requested = Signal()
+    appearance_changed = Signal()
 
     def __init__(self, manager):
         super().__init__()
@@ -191,6 +194,56 @@ class SettingsPage(QWidget):
         auto_hint = QLabel("When off, use “Apply changes” (or Launch) to push your changes into the game.")
         auto_hint.setObjectName("Muted")
         root.addWidget(auto_hint)
+
+        root.addWidget(_section("Appearance"))
+        ap = QHBoxLayout()
+        ap.addWidget(QLabel("Size"))
+        self.scale_box = QComboBox()
+        for name in theme.SCALES:
+            self.scale_box.addItem(name, name)
+        self.scale_box.setCurrentText(manager.lib.settings.ui_scale if manager.lib.settings.ui_scale in theme.SCALES else "Normal")
+        self.scale_box.currentTextChanged.connect(self._scale_changed)
+        ap.addWidget(self.scale_box)
+        ap.addSpacing(18)
+        ap.addWidget(QLabel("Theme"))
+        self.preset_box = QComboBox()
+        for name in theme.PRESETS:
+            self.preset_box.addItem(name, name)
+        self.preset_box.setCurrentText(manager.lib.settings.theme_preset if manager.lib.settings.theme_preset in theme.PRESETS else theme.DEFAULT_PRESET)
+        self.preset_box.currentTextChanged.connect(self._preset_changed)
+        ap.addWidget(self.preset_box)
+        self.reset_colors = QPushButton("Reset colours")
+        self.reset_colors.setToolTip("Drop your custom colours and go back to the theme's own")
+        self.reset_colors.clicked.connect(self._reset_colors)
+        ap.addWidget(self.reset_colors)
+        ap.addStretch(1)
+        root.addLayout(ap)
+        swatch_hint = QLabel("Click a colour to change it. Changes apply straight away.")
+        swatch_hint.setObjectName("Muted")
+        root.addWidget(swatch_hint)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(18)
+        grid.setVerticalSpacing(6)
+        self.swatches: dict[str, QPushButton] = {}
+        for i, (token, (label, what)) in enumerate(theme.TOKENS.items()):
+            row, col = divmod(i, 4)
+            btn = QPushButton()
+            btn.setObjectName("Swatch")
+            btn.setFixedSize(44, 24)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setToolTip(f"{label}: {what}")
+            btn.clicked.connect(lambda _c=False, t=token: self._pick_color(t))
+            self.swatches[token] = btn
+            cell = QHBoxLayout()
+            cell.setSpacing(10)
+            cell.addWidget(btn)
+            lbl = QLabel(label)
+            lbl.setObjectName("Muted")
+            cell.addWidget(lbl)
+            cell.addStretch(1)
+            grid.addLayout(cell, row, col)
+        root.addLayout(grid)
+        self._refresh_swatches()
 
         root.addWidget(_section("Game files"))
         g = QHBoxLayout()
@@ -256,6 +309,52 @@ class SettingsPage(QWidget):
         root.addWidget(info)
         root.addStretch(1)
         self.refresh()
+
+    # ------------------------------------------------------------ appearance
+    def _refresh_swatches(self):
+        for token, btn in self.swatches.items():
+            color = theme.current_tokens()[token]
+            btn.setStyleSheet(f"#Swatch {{ background: {color}; }}")
+        self.reset_colors.setVisible(bool(self.mgr.lib.settings.theme_colors))
+
+    def _scale_changed(self, name):
+        self.mgr.lib.settings.ui_scale = name
+        self.mgr.lib.save()
+        self.appearance_changed.emit()
+
+    def _preset_changed(self, name):
+        self.mgr.lib.settings.theme_preset = name
+        self.mgr.lib.settings.theme_colors = {}
+        self.mgr.lib.save()
+        self.appearance_changed.emit()
+        self._refresh_swatches()
+
+    def _reset_colors(self):
+        self.mgr.lib.settings.theme_colors = {}
+        self.mgr.lib.save()
+        self.appearance_changed.emit()
+        self._refresh_swatches()
+
+    def _pick_color(self, token: str):
+        label = theme.TOKENS[token][0]
+        current = QColor(theme.current_tokens()[token])
+        dlg = QColorDialog(current, self)
+        dlg.setWindowTitle(f"{label} colour")
+        dlg.setOption(QColorDialog.DontUseNativeDialog, True)
+        preview_origin = dict(self.mgr.lib.settings.theme_colors)
+
+        def live(c: QColor):
+            if c.isValid():
+                self.mgr.lib.settings.theme_colors = {**preview_origin, token: c.name()}
+                self.appearance_changed.emit()
+        dlg.currentColorChanged.connect(live)
+        if dlg.exec() == QColorDialog.Accepted and dlg.selectedColor().isValid():
+            self.mgr.lib.settings.theme_colors = {**preview_origin, token: dlg.selectedColor().name()}
+        else:
+            self.mgr.lib.settings.theme_colors = preview_origin
+        self.mgr.lib.save()
+        self.appearance_changed.emit()
+        self._refresh_swatches()
 
     def set_update_state(self, rel, installed=None):
         from sapphire.updater import REPO, running_from_source

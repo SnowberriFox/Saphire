@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem,
-                               QVBoxLayout)
+from PySide6.QtWidgets import (QCheckBox, QDialog, QHBoxLayout, QLabel, QPushButton, QTreeWidget,
+                               QTreeWidgetItem, QVBoxLayout)
 
 from sapphire.importers import ImportPlan
 from sapphire.ui import theme
@@ -21,6 +21,7 @@ class ImportDialog(QDialog):
         self.mgr = manager
         self.which = which
         self.plan: ImportPlan | None = None
+        self._n_mods = 0
         name = SOURCE_NAMES.get(which, which)
         self.setWindowTitle(f"Import from {name}")
         self.setMinimumSize(640, 480)
@@ -42,6 +43,10 @@ class ImportDialog(QDialog):
         self.tree.header().setSectionResizeMode(2, self.tree.header().ResizeMode.ResizeToContents)
         self.tree.setRootIsDecorated(False)
         lay.addWidget(self.tree, 1)
+        self.profiles_only = QCheckBox("Only bring over profiles (match them to mods I already have)")
+        self.profiles_only.setToolTip("Use this after you've already imported once and made new profiles over there")
+        self.profiles_only.toggled.connect(self._sync_button)
+        lay.addWidget(self.profiles_only)
         self.note = QLabel(f"Nothing in {name} is changed or deleted. Mods are copied into Sapphire's library.")
         self.note.setObjectName("Muted")
         self.note.setWordWrap(True)
@@ -98,7 +103,19 @@ class ImportDialog(QDialog):
             self.tree.addTopLevelItem(item)
         for w in plan.warnings:
             item = QTreeWidgetItem([w, "", ""])
-            item.setForeground(0, QColor("#E8A598"))
+            item.setForeground(0, QColor(theme.DANGER_TEXT))
             self.tree.addTopLevelItem(item)
-        self.go.setEnabled(bool(local or dl))
-        self.go.setText(f"Import {len(local) + len(dl)} mod{'s' if len(local) + len(dl) != 1 else ''}")
+        self._n_mods = len(local) + len(dl)
+        self.profiles_only.setVisible(bool(plan.profiles))
+        self._sync_button()
+
+    def _sync_button(self):
+        if self.plan is None:
+            return
+        if self.profiles_only.isChecked():
+            n = len(self.plan.profiles)
+            self.go.setEnabled(n > 0)
+            self.go.setText(f"Import {n} profile{'s' if n != 1 else ''}")
+        else:
+            self.go.setEnabled(self._n_mods > 0)
+            self.go.setText(f"Import {self._n_mods} mod{'s' if self._n_mods != 1 else ''}")

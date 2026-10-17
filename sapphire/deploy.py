@@ -114,8 +114,10 @@ class DeployResult:
     folders: list[str] | None = None
 
 
-def deploy(citadel: Path, placements: list[Placement], previous: dict[str, dict]) -> tuple[DeployResult, dict]:
-    """Make citadel/addons* match `placements`. Returns (result, new deployed record)."""
+def deploy(citadel: Path, placements: list[Placement], previous: dict[str, dict],
+           force: bool = False) -> tuple[DeployResult, dict]:
+    """Make citadel/addons* match `placements`. Returns (result, new deployed record).
+    `force` rewrites every file even when it already matches."""
     citadel = Path(citadel)
     if not citadel.is_dir():
         raise DeployError(f"{citadel} doesn't exist")
@@ -148,7 +150,7 @@ def deploy(citadel: Path, placements: list[Placement], previous: dict[str, dict]
 
     for rel, p in wanted.items():
         dst = citadel / rel
-        if dst.exists() and _same(dst, p.src, previous.get(rel)):
+        if not force and dst.exists() and _same(dst, p.src, previous.get(rel)):
             result.kept += 1
         else:
             _place(p.src, dst)

@@ -92,7 +92,8 @@ class CardDelegate(QStyledItemDelegate):
         self.view = view
         self.images = images
         self.installed_fn = installed_fn  # sub -> "installed" | "update" | None
-        self.card_size = QSize(232, 210)
+        self.card_size = QSize(theme.px(232), theme.px(210))
+        self.mode = "grid"   # or "list"
 
     def sizeHint(self, option, index):
         return self.card_size
@@ -101,6 +102,8 @@ class CardDelegate(QStyledItemDelegate):
         sub: Submission = index.data(ROLE_SUB)
         if sub is None:
             return
+        if self.mode == "list":
+            return self._paint_row(p, option, sub)
         p.save()
         p.setRenderHint(QPainter.Antialiasing)
         r = QRectF(option.rect).adjusted(6, 6, -6, -6)
@@ -137,34 +140,12 @@ class CardDelegate(QStyledItemDelegate):
             p.drawText(img_rect, Qt.AlignCenter, (sub.name[:1] or "?").upper())
         p.restore()
 
-        # badges on the image
-        state = self.installed_fn(sub)
-        bx = img_rect.left() + 8
-        for text, bg, fg in (
-            ("Update ready", theme.ACCENT, "#0B1426") if state == "update" else
-            ("Installed", "#1E3A2F", theme.VERDIGRIS) if state == "installed" else (None, None, None),
-            ("18+", theme.OXBLOOD, "#FFF2EE") if sub.nsfw else (None, None, None),
-            ("Outdated", "#2E3545", theme.MUTED) if sub.obsolete else (None, None, None),
-        ):
-            if not text:
-                continue
-            f = QFont(p.font())
-            f.setPixelSize(11)
-            f.setBold(True)
-            p.setFont(f)
-            w = p.fontMetrics().horizontalAdvance(text) + 14
-            badge = QRectF(bx, img_rect.top() + 8, w, 20)
-            bp = QPainterPath()
-            bp.addRoundedRect(badge, 10, 10)
-            p.fillPath(bp, QColor(bg))
-            p.setPen(QColor(fg))
-            p.drawText(badge, Qt.AlignCenter, text)
-            bx += w + 6
+        self._badges(p, sub, img_rect.left() + theme.px(8), img_rect.top() + theme.px(8))
 
         # text
-        text_rect = QRectF(r.left() + 10, img_rect.bottom() + 8, r.width() - 20, 38)
+        text_rect = QRectF(r.left() + theme.px(10), img_rect.bottom() + theme.px(8), r.width() - theme.px(20), theme.px(38))
         f = QFont(p.font())
-        f.setPixelSize(13)
+        f.setPixelSize(theme.px(13))
         f.setBold(True)
         p.setFont(f)
         p.setPen(QColor(theme.TEXT))
@@ -184,21 +165,103 @@ class CardDelegate(QStyledItemDelegate):
         if len(lines) == 2 and " ".join(lines) != sub.name:
             lines[1] = fm.elidedText(lines[1] + " …", Qt.ElideRight, int(text_rect.width()))
         lines = [fm.elidedText(l, Qt.ElideRight, int(text_rect.width())) for l in lines[:2]]
+        lh = theme.px(18)
         for i, line in enumerate(lines):
-            p.drawText(QRectF(text_rect.left(), text_rect.top() + i * 18, text_rect.width(), 18),
+            p.drawText(QRectF(text_rect.left(), text_rect.top() + i * lh, text_rect.width(), lh),
                        Qt.AlignLeft | Qt.AlignVCenter, line)
 
         f.setBold(False)
-        f.setPixelSize(12)
+        f.setPixelSize(theme.px(12))
         p.setFont(f)
         p.setPen(QColor(theme.MUTED))
-        meta_rect = QRectF(r.left() + 10, r.bottom() - 24, r.width() - 20, 18)
+        meta_rect = QRectF(r.left() + theme.px(10), r.bottom() - theme.px(24), r.width() - theme.px(20), theme.px(18))
         likes = f"♥ {fmt_count(sub.likes)}"
         lw = p.fontMetrics().horizontalAdvance(likes)
         p.drawText(meta_rect.adjusted(0, 0, -(lw + 10), 0), Qt.AlignLeft | Qt.AlignVCenter,
                    p.fontMetrics().elidedText(sub.author or "unknown", Qt.ElideRight,
                                               int(meta_rect.width() - lw - 10)))
         p.drawText(meta_rect, Qt.AlignRight | Qt.AlignVCenter, likes)
+        p.restore()
+
+    def _badges(self, p: QPainter, sub: Submission, bx: float, by: float) -> float:
+        """Draw the status badges starting at (bx, by); returns the x after the last one."""
+        state = self.installed_fn(sub)
+        for text, bg, fg in (
+            ("Update ready", theme.ACCENT, theme.ON_ACCENT) if state == "update" else
+            ("Installed", theme.OK_BG, theme.VERDIGRIS) if state == "installed" else (None, None, None),
+            ("18+", theme.OXBLOOD, "#FFF2EE") if sub.nsfw else (None, None, None),
+            ("Outdated", theme.RAISED, theme.MUTED) if sub.obsolete else (None, None, None),
+        ):
+            if not text:
+                continue
+            f = QFont(p.font())
+            f.setPixelSize(theme.px(11))
+            f.setBold(True)
+            p.setFont(f)
+            w = p.fontMetrics().horizontalAdvance(text) + theme.px(14)
+            badge = QRectF(bx, by, w, theme.px(20))
+            bp = QPainterPath()
+            bp.addRoundedRect(badge, theme.px(10), theme.px(10))
+            p.fillPath(bp, QColor(bg))
+            p.setPen(QColor(fg))
+            p.drawText(badge, Qt.AlignCenter, text)
+            bx += w + theme.px(6)
+        return bx
+
+    def _paint_row(self, p: QPainter, option, sub: Submission):
+        p.save()
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(option.rect).adjusted(4, 3, -4, -3)
+        selected = bool(option.state & QStyle.State_Selected)
+        hovered = bool(option.state & QStyle.State_MouseOver)
+        path = QPainterPath()
+        path.addRoundedRect(r, 7, 7)
+        p.fillPath(path, QColor(theme.RAISED if selected else theme.PANEL))
+        if selected or hovered:
+            p.setPen(QPen(QColor(theme.ACCENT_LO if selected else theme.LINE), 1.2))
+            p.drawPath(path)
+        thumb = QRectF(r.left() + theme.px(8), r.top() + theme.px(6), theme.px(96), r.height() - theme.px(12))
+        tp = QPainterPath()
+        tp.addRoundedRect(thumb, 5, 5)
+        pix = self.images.get(sub.thumb_url)
+        p.save()
+        p.setClipPath(tp)
+        if pix is not None and not pix.isNull():
+            scaled = pix.scaled(int(thumb.width()), int(thumb.height()), Qt.KeepAspectRatioByExpanding,
+                                Qt.SmoothTransformation)
+            sx = (scaled.width() - thumb.width()) / 2
+            sy = (scaled.height() - thumb.height()) / 2
+            p.drawPixmap(thumb.toRect(), scaled, QRect(int(sx), int(sy), int(thumb.width()), int(thumb.height())))
+        else:
+            p.fillPath(tp, QColor(theme.BG))
+            p.setPen(QColor(theme.LINE))
+            p.setFont(theme.display_font(20))
+            p.drawText(thumb, Qt.AlignCenter, (sub.name[:1] or "?").upper())
+        p.restore()
+        x = thumb.right() + theme.px(12)
+        f = QFont(p.font())
+        f.setPixelSize(theme.px(12))
+        p.setFont(f)
+        p.setPen(QColor(theme.MUTED))
+        right = f"♥ {fmt_count(sub.likes)}    {fmt_count(sub.views)} views    {fmt_date(sub.date_modified)}"
+        rw = p.fontMetrics().horizontalAdvance(right)
+        p.drawText(QRectF(r.right() - rw - theme.px(12), r.top(), rw, r.height()), Qt.AlignVCenter | Qt.AlignRight, right)
+        text_w = r.right() - rw - theme.px(24) - x
+        f.setPixelSize(theme.px(14))
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QColor(theme.TEXT))
+        p.drawText(QRectF(x, r.top() + theme.px(8), text_w, theme.px(20)), Qt.AlignLeft | Qt.AlignVCenter,
+                   p.fontMetrics().elidedText(sub.name, Qt.ElideRight, int(text_w)))
+        f.setBold(False)
+        f.setPixelSize(theme.px(12))
+        p.setFont(f)
+        p.setPen(QColor(theme.MUTED))
+        meta = f"by {sub.author or 'unknown'}    {sub.category_label}" if sub.category_label else f"by {sub.author or 'unknown'}"
+        meta = p.fontMetrics().elidedText(meta, Qt.ElideRight, int(text_w * 0.6))
+        mw = p.fontMetrics().horizontalAdvance(meta)
+        p.drawText(QRectF(x, r.top() + theme.px(30), text_w, theme.px(18)), Qt.AlignLeft | Qt.AlignVCenter, meta)
+        self._badges(p, sub, x + mw + theme.px(14), r.top() + theme.px(29))
         p.restore()
 
 
@@ -224,15 +287,40 @@ class CardGrid(QListView):
         if bar.maximum() - value < 600:
             self.near_bottom.emit()
 
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
+    def set_mode(self, mode: str):
         delegate = self.itemDelegate()
         if isinstance(delegate, CardDelegate):
-            avail = self.viewport().width() - 4
-            cols = max(1, avail // 228)
+            delegate.mode = mode
+        if mode == "list":
+            self.setViewMode(QListView.ListMode)
+            self.setFlow(QListView.TopToBottom)
+            self.setWrapping(False)
+        else:
+            self.setViewMode(QListView.IconMode)
+            self.setFlow(QListView.LeftToRight)
+            self.setWrapping(True)
+        self.setResizeMode(QListView.Adjust)
+        self.setMovement(QListView.Static)
+        self.relayout()
+        self.viewport().update()
+
+    def relayout(self):
+        delegate = self.itemDelegate()
+        if not isinstance(delegate, CardDelegate):
+            return
+        avail = self.viewport().width() - 4
+        if delegate.mode == "list":
+            delegate.card_size = QSize(avail, theme.px(72))
+        else:
+            cols = max(1, avail // theme.px(228))
             w = avail // cols
-            delegate.card_size = QSize(w, int((w - 12) * 9 / 16) + 96)
-            self.setGridSize(delegate.card_size)
+            delegate.card_size = QSize(w, int((w - 12) * 9 / 16) + theme.px(96))
+        self.setGridSize(delegate.card_size)
+        self.scheduleDelayedItemsLayout()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.relayout()
 
 
 # ---------------------------------------------------------------- detail pane
@@ -284,7 +372,7 @@ class DetailPane(QScrollArea):
         self.setObjectName("DetailPanel")
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.NoFrame)
-        self.setFixedWidth(384)
+        self.setFixedWidth(theme.px(384))
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.body = QWidget()
         self.body.setObjectName("DetailPanel")
@@ -486,7 +574,7 @@ class FilterPanel(QWidget):
     def __init__(self, settings):
         super().__init__()
         self.setObjectName("FilterPanel")
-        self.setFixedWidth(250)
+        self.setFixedWidth(theme.px(250))
         self.settings = settings
         lay = QVBoxLayout(self)
         lay.setContentsMargins(14, 14, 14, 14)
@@ -658,6 +746,24 @@ class BrowsePage(QWidget):
         self.author_chip.clicked.connect(self.clear_author)
         top.addWidget(self.author_chip)
         top.addStretch(1)
+        self.view_group = QButtonGroup(self)
+        for i, (label, mode, tip) in enumerate((("Grid", "grid", "Big cards with previews"),
+                                                 ("List", "list", "Compact rows, more mods on screen"))):
+            b = QPushButton(label)
+            b.setCheckable(True)
+            b.setProperty("kind", "toggle")
+            b.setProperty("mode", mode)
+            b.setToolTip(tip)
+            radius = "border-top-left-radius:5px;border-bottom-left-radius:5px;" if i == 0 else \
+                "border-top-right-radius:5px;border-bottom-right-radius:5px;"
+            b.setStyleSheet(f"QPushButton {{ {radius} padding: 4px 12px; }}")
+            self.view_group.addButton(b, i)
+            top.addWidget(b)
+            if mode == manager.lib.settings.view_mode:
+                b.setChecked(True)
+        if not self.view_group.checkedButton():
+            self.view_group.button(0).setChecked(True)
+        self.view_group.idToggled.connect(lambda i, on: on and self._view_changed(self.view_group.button(i).property("mode")))
         cl.addLayout(top)
 
         self.grid = CardGrid()
@@ -665,6 +771,7 @@ class BrowsePage(QWidget):
         self.grid.setModel(self.model)
         self.delegate = CardDelegate(self.grid, images, self._install_state)
         self.grid.setItemDelegate(self.delegate)
+        self.grid.set_mode(manager.lib.settings.view_mode if manager.lib.settings.view_mode in ("grid", "list") else "grid")
         self.grid.near_bottom.connect(self.load_more)
         self.grid.selectionModel().currentChanged.connect(self._selected)
         cl.addWidget(self.grid, 1)
@@ -708,6 +815,18 @@ class BrowsePage(QWidget):
         if not mod:
             return None
         return "update" if mod.update else "installed"
+
+    def _view_changed(self, mode: str):
+        self.mgr.lib.settings.view_mode = mode
+        self.mgr.lib.save()
+        self.grid.set_mode(mode)
+        QTimer.singleShot(0, self._maybe_fill)
+
+    def rescale(self):
+        self.filters.setFixedWidth(theme.px(250))
+        self.detail.setFixedWidth(theme.px(384))
+        self.grid.relayout()
+        self.detail.refresh()
 
     def library_changed(self):
         self.model.refresh_all()

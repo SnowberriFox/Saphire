@@ -75,7 +75,7 @@ class Step(QWidget):
         self._ready = False
 
     def set_status(self, text: str, tone: str = "muted"):
-        color = {"ok": theme.VERDIGRIS, "bad": "#E8A598", "muted": theme.MUTED}[tone]
+        color = {"ok": theme.VERDIGRIS, "bad": theme.DANGER_TEXT, "muted": theme.MUTED}[tone]
         self.status.setStyleSheet(f"background: transparent; color: {color};")
         self.status.setText(text)
 

@@ -408,6 +408,17 @@ def read_grimoire(game_dir: Path, data_dir: Path | None = None, home: Path | Non
                     break
             if key is None and isinstance(pm.get("fileName"), str):
                 key = key_of_file.get(pm["fileName"]) or key_of_file.get(Path(pm["fileName"]).name)
+            if key is None and gb_id:
+                # The profile names a GameBanana mod whose file isn't on disk any more (or is
+                # already managed by Sapphire). Keep a placeholder so a full import can
+                # re-download it and a profiles-only import can match it by id.
+                model = "Mod"
+                key = f"{model}-{gb_id}-{file_id}" if file_id else f"{model}-{gb_id}"
+                if key not in groups:
+                    groups[key] = ImportMod(key=key, name=str(pm.get("fileName") or f"GameBanana mod {gb_id}"),
+                                            model=model, gb_id=gb_id, file_id=file_id, enabled=bool(pm.get("enabled")),
+                                            order=10**6)
+                    plan.mods.append(groups[key])
             if key and key not in seen:
                 seen.add(key)
                 entries.append((key, bool(pm.get("enabled"))))

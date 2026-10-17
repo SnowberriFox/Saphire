@@ -67,6 +67,22 @@ def is_newer(candidate: str, current: str | None = None) -> bool:
     return parse_version(candidate) > parse_version(current or __version__)
 
 
+def changelog_section(text: str, version: str) -> str:
+    """Pull one version's section out of a Keep-a-Changelog style file."""
+    lines = text.splitlines()
+    out: list[str] = []
+    inside = False
+    for line in lines:
+        if line.startswith("## "):
+            if inside:
+                break
+            inside = parse_version(line) == parse_version(version) and version in line
+            continue
+        if inside:
+            out.append(line)
+    return "\n".join(out).strip()
+
+
 def running_from_source() -> bool:
     """True when started from a git checkout rather than the installed copy."""
     here = Path(__file__).resolve()
@@ -139,8 +155,20 @@ class Updater:
         m = re.search(r'__version__\s*=\s*"([^"]+)"', resp.text)
         if not m:
             return None
-        return Release(version=m.group(1), tarball_url=f"{API}/repos/{self.repo}/tarball/{BRANCH}",
-                       notes="", source="branch", url=f"https://github.com/{self.repo}/commits/{BRANCH}")
+        version = m.group(1)
+        return Release(version=version, tarball_url=f"{API}/repos/{self.repo}/tarball/{BRANCH}",
+                       notes=self._changelog_notes(version), source="branch",
+                       url=f"https://github.com/{self.repo}/blob/{BRANCH}/CHANGELOG.md")
+
+    def _changelog_notes(self, version: str) -> str:
+        """The CHANGELOG.md section for `version`, or '' if there isn't one."""
+        try:
+            resp = self._get(f"{RAW}/{self.repo}/{BRANCH}/CHANGELOG.md")
+        except UpdateError:
+            return ""
+        if resp.status_code != 200:
+            return ""
+        return changelog_section(resp.text, version)
 
     # ----------------------------------------------------------- installing
     def install(self, rel: Release, progress: Callable[[str, int, int], None] | None = None) -> None:

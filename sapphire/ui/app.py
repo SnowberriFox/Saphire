@@ -13,7 +13,7 @@ from PySide6.QtCore import QFileSystemWatcher, Qt, QTimer
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QDialog, QFileDialog, QHBoxLayout, QLabel,
-                               QMainWindow, QProgressBar, QPushButton, QStackedWidget, QStatusBar,
+                               QMainWindow, QMessageBox, QProgressBar, QPushButton, QStackedWidget, QStatusBar,
                                QVBoxLayout, QWidget)
 
 from sapphire import APP_ID, APP_NAME, __version__, paths, steam
@@ -129,6 +129,8 @@ class MainWindow(QMainWindow):
         self.settings.setup_requested.connect(self.run_setup)
         self.settings.import_requested.connect(self.import_from)
         self.settings.app_update_requested.connect(lambda: self.check_app_update(manual=True))
+        self.settings.appearance_changed.connect(self.apply_appearance)
+        self.installed.reapply_requested.connect(self.reapply)
 
         self._apply_timer = QTimer(self, singleShot=True, interval=600)
         self._apply_timer.timeout.connect(self.apply_now)
@@ -334,7 +336,7 @@ class MainWindow(QMainWindow):
         if self.mgr.lib.settings.auto_apply:
             self._apply_timer.start()
 
-    def apply_now(self, quiet: bool = False):
+    def apply_now(self, quiet: bool = False, force: bool = False):
         if not self.mgr.lib.game_dir:
             return
         if self._applying:
@@ -346,7 +348,10 @@ class MainWindow(QMainWindow):
         def done(result):
             self._applying = False
             n = len(self.mgr.lib.enabled_in_order())
-            if not quiet:
+            if force:
+                self.say(f"Reapplied: {result.written} file{'s' if result.written != 1 else ''} rewritten, "
+                         f"{n} mod{'s' if n != 1 else ''} on, gameinfo.gi checked.", 12000)
+            elif not quiet:
                 self.say(f"Applied. {n} mod{'s' if n != 1 else ''} on."
                          + (f" ({result.written} files written)" if result.written else ""))
             self._after_apply()
@@ -361,7 +366,7 @@ class MainWindow(QMainWindow):
                 error(self, "Couldn't apply mods", str(exc))
             self._after_apply()
 
-        run(self.mgr.apply, on_done=done, on_error=failed, pool=JOB_POOL)
+        run(self.mgr.apply, force, on_done=done, on_error=failed, pool=JOB_POOL)
 
     def _after_apply(self):
         self._refresh_nav()
@@ -372,6 +377,20 @@ class MainWindow(QMainWindow):
         if self._apply_again:
             self._apply_again = False
             self.apply_now(quiet=True)
+
+    def reapply(self):
+        if self.running:
+            self.say("Deadlock is running. Close it first, then Reapply.")
+            return
+        self.say("Reapplying every mod…")
+        self.apply_now(force=True)
+
+    def apply_appearance(self):
+        st = self.mgr.lib.settings
+        theme.apply(QApplication.instance(), st.theme_preset, st.theme_colors, theme.SCALES.get(st.ui_scale, 1.0))
+        for page in (self.browse, self.installed):
+            page.rescale()
+        self._refresh_nav()
 
     def check_gameinfo(self, manual: bool = False):
         self._watch_gameinfo()  # the file is replaced on update, so re-watch
@@ -529,6 +548,7 @@ class MainWindow(QMainWindow):
         if dlg.exec() != QDialog.Accepted or dlg.plan is None:
             return
         plan = dlg.plan
+        profiles_only = dlg.profiles_only.isChecked()
         label = f"Import from {plan.source}"
         job = Job(label)
         self._job_started(job)
@@ -538,15 +558,21 @@ class MainWindow(QMainWindow):
                 self._jobs_ui(done, total, stage)
 
         def worker(progress=None):
-            return self.mgr.run_import(plan, choose=self._chooser, progress=progress, cancel=job.cancel)
+            return self.mgr.run_import(plan, choose=self._chooser, progress=progress, cancel=job.cancel,
+                                       profiles_only=profiles_only)
 
         def done(res):
             self._job_finished(job)
             self._library_changed()
             self.request_apply()
-            msg = (f"Imported {res['imported']} mod{'s' if res['imported'] != 1 else ''}"
-                   + (f" and {res['profiles']} profile{'s' if res['profiles'] != 1 else ''}" if res['profiles'] else "")
-                   + f" from {plan.source}.")
+            if profiles_only:
+                msg = f"Imported {res['profiles']} profile{'s' if res['profiles'] != 1 else ''} from {plan.source}."
+                if res.get("unmatched"):
+                    msg += f" {res['unmatched']} mod{'s' if res['unmatched'] != 1 else ''} in them aren't installed here, so they were skipped."
+            else:
+                msg = (f"Imported {res['imported']} mod{'s' if res['imported'] != 1 else ''}"
+                       + (f" and {res['profiles']} profile{'s' if res['profiles'] != 1 else ''}" if res['profiles'] else "")
+                       + f" from {plan.source}.")
             if res["failed"]:
                 msg += f" {res['failed']} failed; see the log."
             self.say(msg, 20000)
@@ -612,7 +638,7 @@ class MainWindow(QMainWindow):
                     self.update_notes.clicked.disconnect()
                 except RuntimeError:
                     pass
-                self.update_notes.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(rel.url)))
+                self.update_notes.clicked.connect(lambda: self._show_notes(rel))
                 self.update_go.setText(f"Update to {rel.version}")
                 self.update_go.setEnabled(True)
                 self.update_later.show()
@@ -628,6 +654,20 @@ class MainWindow(QMainWindow):
                 error(self, "Couldn't check for updates", str(exc))
 
         run(self.updater.check, manual, on_done=done, on_error=failed)
+
+    def _show_notes(self, rel):
+        if not rel.notes:
+            QDesktopServices.openUrl(QUrl(rel.url))
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle(f"What's new in Sapphire {rel.version}")
+        box.setTextFormat(Qt.MarkdownText)
+        box.setText(rel.notes[:6000])
+        more = box.addButton("Open on GitHub", QMessageBox.ActionRole)
+        box.addButton("Close", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is more:
+            QDesktopServices.openUrl(QUrl(rel.url))
 
     def install_app_update(self):
         rel = self.updater.available
@@ -746,10 +786,12 @@ def main(argv=None) -> int:
     QApplication.setApplicationName(APP_NAME)
     QApplication.setDesktopFileName(APP_ID)
     app = QApplication(argv)
-    theme.apply(app)
+    manager = Manager()
+    st = manager.lib.settings
+    theme.apply(app, st.theme_preset, st.theme_colors, theme.SCALES.get(st.ui_scale, 1.0))
     icon = Path(theme.ASSETS) / "sapphire.svg"
     app.setWindowIcon(QIcon(str(icon)))
-    win = MainWindow(Manager())
+    win = MainWindow(manager)
     win.show()
     # Files passed on the command line (e.g. "Open with Sapphire") get installed.
     for arg in argv[1:]:

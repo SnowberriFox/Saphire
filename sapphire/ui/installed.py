@@ -16,7 +16,6 @@ from sapphire.ui import theme
 from sapphire.ui.browse import fmt_date
 
 ROLE_UID = Qt.UserRole + 1
-ROW_H = 66
 
 
 class RowDelegate(QStyledItemDelegate):
@@ -25,7 +24,7 @@ class RowDelegate(QStyledItemDelegate):
         self.page = page
 
     def sizeHint(self, option, index):
-        return QSize(option.rect.width(), ROW_H)
+        return QSize(option.rect.width(), theme.px(66))
 
     def paint(self, p: QPainter, option, index):
         uid = index.data(ROLE_UID)
@@ -54,7 +53,7 @@ class RowDelegate(QStyledItemDelegate):
         # grip
         p.setPen(QColor(theme.LINE))
         f = QFont(p.font())
-        f.setPixelSize(14)
+        f.setPixelSize(theme.px(14))
         p.setFont(f)
         p.drawText(QRectF(r.left() + 4, r.top(), 14, r.height()), Qt.AlignCenter, "⠿")
 
@@ -65,7 +64,7 @@ class RowDelegate(QStyledItemDelegate):
         cp.addRoundedRect(cr, 4, 4)
         if mod.enabled:
             p.fillPath(cp, QColor(theme.ACCENT))
-            p.setPen(QPen(QColor("#0B1426"), 2))
+            p.setPen(QPen(QColor(theme.ON_ACCENT), 2))
             tl = cr.topLeft()
             p.drawPolyline(QPolygonF([tl + QPointF(cr.width() * .25, cr.height() * .52),
                                       tl + QPointF(cr.width() * .43, cr.height() * .70),
@@ -78,7 +77,7 @@ class RowDelegate(QStyledItemDelegate):
         x = cr.right() + 12
         # priority number (only meaningful for enabled mods)
         rank = self.page.rank.get(uid)
-        f.setPixelSize(13)
+        f.setPixelSize(theme.px(13))
         f.setBold(True)
         p.setFont(f)
         p.setPen(QColor(theme.ACCENT if rank and not dim else theme.LINE))
@@ -87,7 +86,7 @@ class RowDelegate(QStyledItemDelegate):
         x += 40
 
         # thumbnail
-        thumb = QRectF(x, r.top() + 7, 80, r.height() - 14)
+        thumb = QRectF(x, r.top() + 7, theme.px(80), r.height() - 14)
         tp = QPainterPath()
         tp.addRoundedRect(thumb, 5, 5)
         pix = self.page.images.get(mod.thumb_url) if mod.thumb_url else None
@@ -113,15 +112,15 @@ class RowDelegate(QStyledItemDelegate):
         # badges (right side)
         badges = []
         if mod.update:
-            badges.append(("Update ready", theme.ACCENT, "#0B1426"))
+            badges.append(("Update ready", theme.ACCENT, theme.ON_ACCENT))
         c: ModConflicts | None = self.page.conflicts.get(uid)
         if mod.enabled and c:
             if c.losing:
-                badges.append((f"Overridden: {c.losing} file{'s' if c.losing != 1 else ''}", "#3A2420", "#E8A598"))
+                badges.append((f"Overridden: {c.losing} file{'s' if c.losing != 1 else ''}", theme.DANGER_BG, theme.DANGER_TEXT))
             if c.winning:
-                badges.append((f"Wins: {c.winning} file{'s' if c.winning != 1 else ''}", "#1E3A2F", theme.VERDIGRIS))
+                badges.append((f"Wins: {c.winning} file{'s' if c.winning != 1 else ''}", theme.OK_BG, theme.VERDIGRIS))
         bf = QFont(p.font())
-        bf.setPixelSize(11)
+        bf.setPixelSize(theme.px(11))
         bf.setBold(True)
         p.setFont(bf)
         bx = r.right() - 10
@@ -137,14 +136,14 @@ class RowDelegate(QStyledItemDelegate):
 
         text_w = bx - x - 10
         f = QFont(p.font())
-        f.setPixelSize(14)
+        f.setPixelSize(theme.px(14))
         f.setBold(True)
         p.setFont(f)
         p.setPen(QColor(theme.MUTED if dim else theme.TEXT))
         p.drawText(QRectF(x, r.top() + 12, text_w, 20), Qt.AlignLeft | Qt.AlignVCenter,
                    p.fontMetrics().elidedText(mod.name, Qt.ElideRight, int(text_w)))
         f.setBold(False)
-        f.setPixelSize(12)
+        f.setPixelSize(theme.px(12))
         p.setFont(f)
         p.setPen(QColor(theme.MUTED))
         bits = []
@@ -175,6 +174,9 @@ class ModList(QListWidget):
         self.setMouseTracking(True)
         self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.setSpacing(0)
+        # Scroll while dragging near the top or bottom edge (a row's height, not Qt's 16px).
+        self.setAutoScroll(True)
+        self.setAutoScrollMargin(theme.px(70))
 
     def dropEvent(self, e):
         super().dropEvent(e)
@@ -188,7 +190,7 @@ class DetailPanel(QScrollArea):
         self.setObjectName("DetailPanel")
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.NoFrame)
-        self.setFixedWidth(360)
+        self.setFixedWidth(theme.px(360))
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.body = QWidget()
         self.body.setObjectName("DetailPanel")
@@ -299,7 +301,7 @@ class DetailPanel(QScrollArea):
                 oname = other.name if other else clash.other_uid
                 verb = "Beats" if clash.wins else "Loses to"
                 top = QTreeWidgetItem([f"{verb} {oname} on {len(clash.files)} file{'s' if len(clash.files) != 1 else ''}"])
-                top.setForeground(0, QColor(theme.VERDIGRIS if clash.wins else "#E8A598"))
+                top.setForeground(0, QColor(theme.VERDIGRIS if clash.wins else theme.DANGER_TEXT))
                 for f in clash.files[:200]:
                     top.addChild(QTreeWidgetItem([f]))
                 tree.addTopLevelItem(top)
@@ -333,6 +335,7 @@ class InstalledPage(QWidget):
     check_updates_requested = Signal()
     add_file_requested = Signal()
     identify_requested = Signal(object)   # list of uids, or None for all unknown
+    reapply_requested = Signal()
     removed = Signal(str)
     status = Signal(str)
 
@@ -379,6 +382,10 @@ class InstalledPage(QWidget):
         self.identify_btn = QPushButton("Identify unknown")
         self.identify_btn.setToolTip("Match mods that were added by hand to their GameBanana page")
         self.identify_btn.clicked.connect(lambda: self.identify_requested.emit(None))
+        self.reapply_btn = QPushButton("Reapply")
+        self.reapply_btn.setToolTip("Turn every mod off and back on: rewrites all files in the game's addons folder "
+                                    "and re-checks gameinfo.gi. Use it if something looks wrong in game.")
+        self.reapply_btn.clicked.connect(self.reapply_requested)
         all_on = QPushButton("All on")
         all_on.clicked.connect(lambda: self.set_all(True))
         all_off = QPushButton("All off")
@@ -386,6 +393,7 @@ class InstalledPage(QWidget):
         for b in (self.check_btn, self.update_all_btn, self.add_btn, self.identify_btn):
             actions.addWidget(b)
         actions.addStretch(1)
+        actions.addWidget(self.reapply_btn)
         actions.addWidget(all_on)
         actions.addWidget(all_off)
         cl.addLayout(actions)
@@ -415,6 +423,12 @@ class InstalledPage(QWidget):
         root.addWidget(self.detail)
         images.loaded.connect(lambda _u: self.list.viewport().update())
         self._building = False
+
+    def rescale(self):
+        self.detail.setFixedWidth(theme.px(360))
+        self.list.setAutoScrollMargin(theme.px(70))
+        self.list.reset()
+        self.reload()
 
     # ---------------------------------------------------------------- data
     def reload(self):
