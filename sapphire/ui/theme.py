@@ -21,28 +21,38 @@ MUTED = "#92A0B4"
 OXBLOOD = "#B65A4E"
 VERDIGRIS = "#6FAE8F"
 
-DISPLAY_FAMILY = "Marcellus"
+DISPLAY_FAMILY = "Josefin Sans"
+BODY_FAMILY = "Inter"
 
 
-def load_fonts() -> str:
-    fid = QFontDatabase.addApplicationFont(str(ASSETS / "Marcellus-Regular.ttf"))
-    fams = QFontDatabase.applicationFontFamilies(fid) if fid >= 0 else []
-    return fams[0] if fams else "serif"
+def load_fonts() -> tuple[str, str]:
+    """Register the bundled fonts. Returns (display family, body family)."""
+    def add(names: list[str], fallback: str) -> str:
+        family = ""
+        for name in names:
+            fid = QFontDatabase.addApplicationFont(str(ASSETS / name))
+            fams = QFontDatabase.applicationFontFamilies(fid) if fid >= 0 else []
+            family = family or (fams[0] if fams else "")
+        return family or fallback
+    display = add(["JosefinSans-SemiBold.ttf"], "sans-serif")
+    body = add(["Inter-Regular.ttf", "Inter-Medium.ttf", "Inter-SemiBold.ttf", "Inter-Bold.ttf"], "sans-serif")
+    return display, body
 
 
 def display_font(size: int) -> QFont:
     f = QFont(DISPLAY_FAMILY)
     f.setPixelSize(size)
+    f.setWeight(QFont.DemiBold)
     return f
 
 
 STYLESHEET = f"""
 * {{ outline: none; }}
-QWidget {{ background: {BG}; color: {TEXT}; font-size: 13px; }}
+QWidget {{ background: {BG}; color: {TEXT}; font-family: "{BODY_FAMILY}"; font-size: 13px; }}
 QToolTip {{ background: {RAISED}; color: {TEXT}; border: 1px solid {LINE}; padding: 4px 6px; }}
 
 #Header {{ background: {PANEL}; border-bottom: 1px solid {LINE}; }}
-#Wordmark {{ background: transparent; color: {ACCENT}; font-family: "{DISPLAY_FAMILY}"; font-size: 24px; }}
+#Wordmark {{ background: transparent; color: {ACCENT}; font-family: "{DISPLAY_FAMILY}"; font-size: 24px; font-weight: 600; padding-top: 4px; }}
 #NavButton {{ background: transparent; color: {MUTED}; border: none; padding: 8px 12px;
               font-size: 14px; border-bottom: 2px solid transparent; }}
 #NavButton:hover {{ color: {TEXT}; }}
@@ -60,11 +70,11 @@ QToolTip {{ background: {RAISED}; color: {TEXT}; border: 1px solid {LINE}; paddi
 #StatusPill[state="warn"] {{ color: {ACCENT_HI}; border-color: {ACCENT_LO}; }}
 #StatusPill[state="bad"] {{ color: #E08A7E; border-color: {OXBLOOD}; }}
 
-#PageTitle {{ background: transparent; font-family: "{DISPLAY_FAMILY}"; font-size: 22px; color: {TEXT}; }}
+#PageTitle {{ background: transparent; font-family: "{DISPLAY_FAMILY}"; font-size: 22px; font-weight: 600; color: {TEXT}; padding-top: 3px; }}
 #SideTitle {{ background: transparent; color: {MUTED}; font-size: 12px; font-weight: 600; padding-top: 6px; }}
 #Muted {{ background: transparent; color: {MUTED}; }}
 #Panel, #FilterPanel, #DetailPanel {{ background: {PANEL}; }}
-#DetailTitle {{ background: transparent; font-family: "{DISPLAY_FAMILY}"; font-size: 20px; color: {TEXT}; }}
+#DetailTitle {{ background: transparent; font-family: "{DISPLAY_FAMILY}"; font-size: 20px; font-weight: 600; color: {TEXT}; padding-top: 3px; }}
 #Banner {{ background: #1E2A44; color: {ACCENT_HI}; border: 1px solid {ACCENT_LO}; border-radius: 6px; padding: 8px 12px; }}
 #BannerBad {{ background: #3A2228; color: #E8A598; border: 1px solid {OXBLOOD}; border-radius: 6px; padding: 8px 12px; }}
 
@@ -118,9 +128,12 @@ QMessageBox {{ background: {PANEL}; }}
 
 
 def apply(app: QApplication) -> None:
-    global DISPLAY_FAMILY
-    DISPLAY_FAMILY = load_fonts()
+    global DISPLAY_FAMILY, BODY_FAMILY
+    DISPLAY_FAMILY, BODY_FAMILY = load_fonts()
     app.setStyle("Fusion")
+    body = QFont(BODY_FAMILY)
+    body.setPixelSize(13)
+    app.setFont(body)
     pal = QPalette()
     for role, color in (
         (QPalette.Window, BG), (QPalette.Base, RAISED), (QPalette.AlternateBase, PANEL),
@@ -131,6 +144,6 @@ def apply(app: QApplication) -> None:
     ):
         pal.setColor(role, QColor(color))
     app.setPalette(pal)
-    sheet = STYLESHEET.replace('"Marcellus"', f'"{DISPLAY_FAMILY}"')
+    sheet = STYLESHEET.replace('"Josefin Sans"', f'"{DISPLAY_FAMILY}"').replace('"Inter"', f'"{BODY_FAMILY}"')
     sheet = sheet.replace("@CHECK@", (ASSETS / "check.svg").as_posix())
     app.setStyleSheet(sheet)
