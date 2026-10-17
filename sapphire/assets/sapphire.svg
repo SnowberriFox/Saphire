@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="gem" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8FB8FF"/>
+      <stop offset="0.5" stop-color="#4F86E6"/>
+      <stop offset="1" stop-color="#23448F"/>
+    </linearGradient>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E2C17E"/>
+      <stop offset="1" stop-color="#A9823F"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="#141A23"/>
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="none" stroke="#344158" stroke-width="4"/>
+  <!-- art-deco brass setting -->
+  <path d="M84 52 H172 L196 76 V180 L172 204 H84 L60 180 V76 Z" fill="url(#plate)"/>
+  <path d="M92 64 H164 L184 84 V172 L164 192 H92 L72 172 V84 Z" fill="none" stroke="#7A5E2C" stroke-width="3"/>
+  <!-- the sapphire: a cushion-cut gem seen from above -->
+  <path d="M128 86 L166 112 L128 170 L90 112 Z" fill="url(#gem)"/>
+  <path d="M128 86 L166 112 L128 170 L90 112 Z" fill="none" stroke="#1A2D5C" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M128 86 L128 170 M90 112 L166 112 M109 99 L147 99 M109 141 L147 141" stroke="#1A2D5C" stroke-width="2" opacity="0.55"/>
+  <path d="M112 100 L128 92 L144 100 L128 108 Z" fill="#C7DCFF" opacity="0.8"/>
+</svg>

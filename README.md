@@ -1,0 +1,113 @@
+# Sapphire
+
+A fast, reliable Deadlock mod manager for Linux. Browse GameBanana live, install
+with one click, drag mods into the order you want, see exactly which mods clash,
+and keep everything working after game updates.
+
+Works the same on **Ubuntu** and **Bazzite** (and other Linux desktops). Finds
+Deadlock whether Steam is native, Flatpak or Snap, on any library drive.
+
+## Install
+
+You need the folder this README is in. Open a terminal in it and run:
+
+```sh
+./install.sh
+```
+
+That's it. Sapphire appears in your app menu. The installer:
+
+- needs no `sudo`, so it works on immutable systems like Bazzite
+- installs everything into your home folder (`~/.local/share/sapphire`)
+- downloads its own Python and Qt through [uv](https://docs.astral.sh/uv/), so it
+  doesn't care what Python your system has
+- bundles 7-Zip so `.rar` and `.7z` mods work out of the box
+
+Run `./install.sh` again any time to update Sapphire. Your mods, profiles and
+settings are kept.
+
+To uninstall: `./uninstall.sh` (keeps your mod library) or `./uninstall.sh --purge`.
+
+## Using it
+
+- **First run**: a short setup wizard confirms the third-party content notice, finds
+  Deadlock, offers to import mods you already have, and checks GameBanana is
+  reachable. Run it again any time from Settings.
+- **Browse**: live GameBanana catalogue. Filter by category or hero (type to find
+  one), sort, search, switch between mods and sounds, hide 18+, outdated or
+  already-installed mods. Click an author's name to see everything they've made.
+  Paste a GameBanana link to install it directly.
+- **Installed**: drag to set priority. **Higher in the list wins** when two mods
+  change the same file. Each mod shows whether it wins or gets overridden, and the
+  side panel lists the exact files. Tick boxes turn mods on and off.
+- **Profiles**: save a setup (which mods are on plus their order) and switch in one
+  click.
+- **Launch Deadlock**: applies everything, double-checks `gameinfo.gi`, then
+  starts the game through Steam.
+
+You can also drag `.zip`, `.7z`, `.rar` or `.vpk` files onto the window to add them.
+
+If a download contains several VPKs (colour variants, optional parts), Sapphire
+asks which ones you want and remembers your choice for future updates.
+
+## How it works (and why it's reliable)
+
+1. **Your mods live in Sapphire's library**, not in the game folder:
+   `~/.local/share/sapphire/library`. Reinstalling or verifying the game never
+   loses them.
+2. **The game's `addons` folder is generated** from your load order every time you
+   apply. Sapphire works out exactly which `pakNN_dir.vpk` files should exist, skips
+   ones that are already right, writes changed ones atomically, and removes
+   leftovers. It only ever touches `pakNN_*.vpk` files. Files are hard-linked from
+   the library when the game is on the same drive (instant, no extra space) and
+   copied otherwise.
+3. **More than 99 mods?** Deadlock only loads 99 per folder, so Sapphire spills
+   over into `addons2`, `addons3` and so on, in priority order.
+4. **`gameinfo.gi` gets one small, clearly marked block** inserted before
+   `Game citadel`. Nothing else in the file is changed, including Windows line
+   endings. If you used another mod manager before, its edits are cleaned up.
+5. **Game updates** replace `gameinfo.gi`. Sapphire watches the file and puts the
+   block back automatically, and re-checks before every launch.
+6. **Mods you added by hand** to `addons` are adopted into the library (shown as
+   "Manual install") instead of being deleted.
+7. **Nothing is changed while Deadlock is running.** Changes queue up and apply as
+   soon as you close the game.
+
+## Troubleshooting
+
+- **"Deadlock not found"**: Settings → Choose… and pick the `Deadlock` folder (the
+  one containing `game`). Steam → Deadlock → Manage → Browse local files shows it.
+- **Mods not showing in game**: launch through Sapphire's button once, or use
+  Settings → Re-check gameinfo.gi. If you launch from Steam right after a game
+  update with Sapphire closed, that session runs unmodded.
+- **Start completely fresh**: Settings → "Turn everything off and restore the game".
+- **Logs**: Settings → Open log file (`~/.local/share/sapphire/sapphire.log`).
+
+Only use cosmetic mods. Valve allows client-side visual and audio mods; anything
+that gives a gameplay advantage can get you banned.
+
+## Development
+
+```sh
+uv venv && uv pip install -e '.[dev]'
+.venv/bin/python -m pytest          # unit + integration tests
+.venv/bin/python -m sapphire        # run from source
+QT_QPA_PLATFORM=offscreen .venv/bin/python tests/ui_smoke.py /tmp/shots   # UI screenshots with fake data
+```
+
+Code map:
+
+| File | What it does |
+|---|---|
+| `sapphire/gamebanana.py` | GameBanana apiv11 client (browse, search, categories, files, downloads) |
+| `sapphire/steam.py` | Finds Steam and Deadlock, detects if the game is running, launches it |
+| `sapphire/gameinfo.py` | Adds/removes the marked block in `gameinfo.gi` |
+| `sapphire/vpk.py` | Reads VPK file lists (for conflict detection) |
+| `sapphire/archive.py` | Safe extraction of zip/7z/rar |
+| `sapphire/deploy.py` | Turns the load order into files in `addons*` |
+| `sapphire/library.py` | Saved state: mods, order, profiles (atomic JSON) |
+| `sapphire/core.py` | The manager: install, update, apply, profiles |
+| `sapphire/ui/` | The Qt interface (`onboarding.py` is the first-run wizard) |
+
+Data lives in `~/.local/share/sapphire` (`SAPPHIRE_HOME` overrides it, handy for
+testing). Set `SAPPHIRE_DEBUG=1` for verbose logs in the terminal.
