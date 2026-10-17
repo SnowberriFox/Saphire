@@ -12,6 +12,7 @@ as "What's new".
   the load-order number, an on/off box, update and conflict badges, and you
   drag them to reorder just like the list.
 - **Sort by most downloaded** in Browse.
+- The Installed page's detail panel now shows the mod's preview image.
 - **Discord Rich Presence**, off by default. Settings → Discord; needs a Discord
   Application ID (free, two minutes at discord.com/developers). Talks only to
   the Discord app on this computer.

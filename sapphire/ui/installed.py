@@ -361,7 +361,13 @@ class DetailPanel(QScrollArea):
         self.lay.setContentsMargins(16, 16, 16, 16)
         self.lay.setSpacing(10)
         self.uid = None
+        page.images.loaded.connect(self._image_loaded)
         self.show_mod(None)
+
+    def _image_loaded(self, url: str):
+        mod = self.page.mgr.lib.mods.get(self.uid) if self.uid else None
+        if mod and mod.thumb_url == url:
+            self.show_mod(self.uid)
 
     def _clear(self):
         while self.lay.count():
@@ -387,6 +393,23 @@ class DetailPanel(QScrollArea):
             self.lay.addWidget(lbl)
             self.lay.addStretch(1)
             return
+        if mod.thumb_url:
+            img = QLabel()
+            img.setAlignment(Qt.AlignCenter)
+            img.setStyleSheet(f"background: {theme.RAISED}; border-radius: 6px;")
+            img.setMinimumHeight(theme.px(150))
+            pix = self.page.images.get(mod.thumb_url)
+            if pix is not None and not pix.isNull():
+                w = self.width() - 32 - 14
+                scaled = pix.scaledToWidth(max(200, w), Qt.SmoothTransformation)
+                if scaled.height() > theme.px(240):
+                    scaled = pix.scaledToHeight(theme.px(240), Qt.SmoothTransformation)
+                img.setPixmap(scaled)
+                img.setMinimumHeight(0)
+            else:
+                img.setText("Loading preview…")
+                img.setObjectName("Muted")
+            self.lay.addWidget(img)
         title = QLabel(mod.name)
         title.setObjectName("DetailTitle")
         title.setWordWrap(True)
