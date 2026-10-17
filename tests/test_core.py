@@ -284,6 +284,36 @@ def test_variant_chooser_and_update_keeps_choice(setup):
     assert mgr.check_updates() == []
 
 
+def test_other_variants_are_separate_files(setup, tmp_path):
+    """Most GameBanana colour options are separate files: list them, switch, come back."""
+    mgr, game, zips, _ = setup
+    blue = GBFile(id=41, filename="yamato_blue.zip", date_added=100, description="Blue outfit")
+    red = GBFile(id=42, filename="yamato_red.zip", date_added=100, description="Red outfit")
+    old = GBFile(id=40, filename="yamato_v1.zip", date_added=50, archived=True)
+    zips[4] = [(blue, mod_zip(tmp_path, "yblue", {"": {"ui/hud.png": b"blue"}})),
+               (red, mod_zip(tmp_path, "yred", {"": {"ui/hud.png": b"red"}})),
+               (old, mod_zip(tmp_path, "yold", {"": {"ui/hud.png": b"old"}}))]
+    mod = mgr.install_gamebanana("Mod", 4, blue)
+    assert mod.file_id == 41 and len(mod.vpks) == 1
+    files = mgr.variant_files(mod.uid)
+    assert sorted(f.id for f in files) == [40, 41, 42]
+    # switch to the red file
+    switched = mgr.refetch(mod.uid, 42)
+    assert switched.file_id == 42 and switched.file_name == "yamato_red.zip"
+    mgr.apply()
+    assert addons(game) == ["addons/pak01_dir.vpk"]
+    assert vpk.read_entries(game / "game/citadel/addons/pak01_dir.vpk")[0].preload == 3  # "red"
+    # same file again keeps working; a vanished file is a clear error
+    again = mgr.refetch(mod.uid)
+    assert again.file_id == 42
+    with pytest.raises(Exception, match="isn't on GameBanana"):
+        mgr.refetch(mod.uid, 99)
+    # local mods have no GameBanana files to list
+    local = mgr.install_local(make_vpk(tmp_path / "loc" / "x.vpk", {"a.txt": b"x"}))
+    with pytest.raises(Exception, match="Only GameBanana"):
+        mgr.variant_files(local.uid)
+
+
 def test_overflow_into_addons2(setup, tmp_path):
     mgr, game, _, _ = setup
     src = tmp_path / "many"

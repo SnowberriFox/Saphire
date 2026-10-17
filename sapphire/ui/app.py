@@ -21,7 +21,7 @@ from sapphire.core import GameRunning, Manager, NoGame
 from sapphire.gamebanana import Cancelled
 from sapphire.ui import theme
 from sapphire.ui.browse import BrowsePage
-from sapphire.ui.dialogs import choose_variants, confirm, error
+from sapphire.ui.dialogs import choose_file, choose_variants, confirm, error
 from sapphire.ui.downloads import DownloadsPage, Job, JobList
 from sapphire.ui.images import ImageCache
 from sapphire.ui.importing import ImportDialog
@@ -576,13 +576,31 @@ class MainWindow(QMainWindow):
         self._queue(mod.name, do, uid, success="Updated {name}.", kind="update")
 
     def refetch_mod(self, uid: str):
+        """Other variants: list the mod's GameBanana files, let the user pick one, download it."""
         mod = self.mgr.lib.mods.get(uid)
         if not mod:
             return
+        self.say(f"Looking up files for {mod.name}…")
 
-        def do(uid, choose=None, progress=None, cancel=None):
-            return self.mgr.refetch(uid, choose=choose, progress=progress, cancel=cancel)
-        self._queue(mod.name, do, uid, success="Fetched every variant of {name}.", kind="update")
+        def listed(files):
+            self.say("")
+            picked = choose_file(self, files, mod)
+            if picked is None:
+                return
+            again = picked.id == mod.file_id
+
+            def do(uid, file_id, choose=None, progress=None, cancel=None):
+                return self.mgr.refetch(uid, file_id, choose=choose, progress=progress, cancel=cancel)
+            self._queue(f"{mod.name} — {picked.filename}", do, uid, picked.id,
+                        success=("Downloaded {name} again; every VPK it ships is kept." if again
+                                 else "Switched {name} to " + picked.filename + "."),
+                        kind="update")
+
+        def failed(exc):
+            self.say("")
+            error(self, "Couldn't list files", str(exc))
+
+        run(self.mgr.variant_files, uid, on_done=listed, on_error=failed)
 
     def update_all(self):
         for mod in [m for m in self.mgr.lib.ordered() if m.update]:

@@ -468,11 +468,12 @@ class DetailPanel(QScrollArea):
             u.setWordWrap(True)
             self.lay.addWidget(u)
 
-        if len(mod.vpks) > 1:
+        if len(mod.vpks) > 1 or (mod.source == "gamebanana" and mod.gb_id):
             h = QLabel("Variants")
             h.setObjectName("SideTitle")
             self.lay.addWidget(h)
-            vhint = QLabel("Everything this download shipped is kept. Tick the parts you want in the game; "
+        if len(mod.vpks) > 1:
+            vhint = QLabel("Everything this file shipped is kept. Tick the parts you want in the game; "
                            "switching needs no download.")
             vhint.setObjectName("Muted")
             vhint.setWordWrap(True)
@@ -486,10 +487,10 @@ class DetailPanel(QScrollArea):
                 cb.toggled.connect(lambda _on, u=mod.uid: self._variants_changed(u))
                 self.lay.addWidget(cb)
                 self._variant_boxes.append((v.label, cb))
-        elif mod.source == "gamebanana" and mod.vpks:
-            fetch = QPushButton("Get other variants")
-            fetch.setToolTip("Downloads this mod's file again and keeps every variant it ships, so you can "
-                             "switch between them here without downloading again")
+        if mod.source == "gamebanana" and mod.gb_id:
+            fetch = QPushButton("Other files on GameBanana…" if len(mod.vpks) > 1 else "Other variants…")
+            fetch.setToolTip("Lists every file this mod has on GameBanana (colour and style options are "
+                             "usually separate files) so you can switch to another one")
             fetch.clicked.connect(lambda: self.page.refetch_requested.emit(mod.uid))
             self.lay.addWidget(fetch, 0, Qt.AlignLeft)
 

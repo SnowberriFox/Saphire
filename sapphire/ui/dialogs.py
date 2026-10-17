@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QInputDialog, QLabel,
-                               QMessageBox, QScrollArea, QVBoxLayout, QWidget)
+                               QMessageBox, QScrollArea, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
+                               QWidget)
 
+from sapphire.ui import theme
 from sapphire.vpk import VpkSet
 
 
@@ -74,6 +77,110 @@ class VariantDialog(QDialog):
 
 def choose_variants(parent, sets: list[VpkSet], name: str) -> list[VpkSet] | None:
     dlg = VariantDialog(sets, name, parent)
+    if dlg.exec() == QDialog.Accepted:
+        return dlg.chosen()
+    return None
+
+
+class FileVariantDialog(QDialog):
+    """Every file a mod has on GameBanana (colour options are usually separate
+    files), with the installed one marked. Pick one to switch to it."""
+
+    def __init__(self, files: list, mod, parent=None):
+        super().__init__(parent)
+        from sapphire.ui.browse import fmt_date
+        self.setWindowTitle("Other variants")
+        self.setMinimumSize(620, 380)
+        self.files = sorted(files, key=lambda f: (f.archived, -f.date_added, -f.id))
+        self.mod = mod
+        lay = QVBoxLayout(self)
+        lay.setSpacing(10)
+        n = sum(1 for f in self.files if not f.archived)
+        title = QLabel(f"“{mod.name}” has {len(self.files)} file{'s' if len(self.files) != 1 else ''} on GameBanana"
+                       + (f" ({len(self.files) - n} old)" if n != len(self.files) else "") + ".")
+        title.setWordWrap(True)
+        title.setStyleSheet("font-size: 15px;")
+        lay.addWidget(title)
+        if len(self.files) > 1:
+            hint = ("Colour and style options are usually separate files, one per option. Pick the one you "
+                    "want and Sapphire downloads it in place of the current file. Picking the file you already "
+                    "have downloads it again and keeps every VPK inside it, in case it holds several variants.")
+        else:
+            hint = ("This mod has a single file, so any variants are inside it. Download it again and Sapphire "
+                    "keeps every VPK it ships; they then show up as tick boxes in the details panel.")
+        h = QLabel(hint)
+        h.setObjectName("Muted")
+        h.setWordWrap(True)
+        lay.addWidget(h)
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["File", "Size", "Added", "Notes"])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setAlternatingRowColors(False)
+        self.tree.setSelectionMode(QTreeWidget.SingleSelection)
+        self.tree.setAllColumnsShowFocus(True)
+        current = None
+        for f in self.files:
+            installed = f.id == mod.file_id
+            notes = f.description or ""
+            if installed:
+                notes = ("Installed · " + notes) if notes else "Installed"
+            if f.archived:
+                notes = ("Old file · " + notes) if notes else "Old file"
+            it = QTreeWidgetItem([f.filename, human_size(f.size), fmt_date(f.date_added), notes])
+            it.setToolTip(0, f.filename)
+            it.setToolTip(3, f.description or "")
+            it.setData(0, Qt.UserRole, f.id)
+            if installed:
+                font = it.font(0)
+                font.setBold(True)
+                for c in range(4):
+                    it.setFont(c, font)
+                current = it
+            if f.archived:
+                for c in range(4):
+                    it.setForeground(c, QColor(theme.MUTED))
+            self.tree.addTopLevelItem(it)
+        for c in range(4):
+            self.tree.resizeColumnToContents(c)
+        self.tree.setColumnWidth(0, max(self.tree.columnWidth(0), 220))
+        self.tree.header().setStretchLastSection(True)
+        self.tree.itemSelectionChanged.connect(self._sync)
+        self.tree.itemDoubleClicked.connect(lambda *_: self.accept() if self.ok.isEnabled() else None)
+        lay.addWidget(self.tree, 1)
+        self.buttons = QDialogButtonBox()
+        self.ok = self.buttons.addButton("Switch to this file", QDialogButtonBox.AcceptRole)
+        self.ok.setProperty("kind", "primary")
+        page = self.buttons.addButton("Open GameBanana page", QDialogButtonBox.ActionRole)
+        page.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(mod.url)))
+        page.setVisible(bool(mod.url))
+        self.buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        lay.addWidget(self.buttons)
+        if current is not None:
+            self.tree.setCurrentItem(current)
+        elif self.tree.topLevelItemCount():
+            self.tree.setCurrentItem(self.tree.topLevelItem(0))
+        self._sync()
+
+    def _sync(self):
+        f = self.chosen()
+        self.ok.setEnabled(f is not None)
+        if f is not None and f.id == self.mod.file_id:
+            self.ok.setText("Download again")
+        else:
+            self.ok.setText("Switch to this file")
+
+    def chosen(self):
+        it = self.tree.currentItem()
+        if it is None:
+            return None
+        fid = it.data(0, Qt.UserRole)
+        return next((f for f in self.files if f.id == fid), None)
+
+
+def choose_file(parent, files: list, mod):
+    dlg = FileVariantDialog(files, mod, parent)
     if dlg.exec() == QDialog.Accepted:
         return dlg.chosen()
     return None

@@ -30,7 +30,7 @@ from sapphire.gamebanana import Category, Details, GameBananaClient, GBFile, Pag
 from sapphire.library import Library  # noqa: E402
 from sapphire.ui import theme  # noqa: E402
 from sapphire.ui.app import MainWindow  # noqa: E402
-from sapphire.ui.dialogs import VariantDialog  # noqa: E402
+from sapphire.ui.dialogs import FileVariantDialog, VariantDialog  # noqa: E402
 from sapphire.vpk import find_sets  # noqa: E402
 
 steam.is_game_running = lambda *a, **k: False
@@ -343,6 +343,24 @@ def main():
         dlg.grab().save(str(OUT / "6-variants.png"))
         print("saved 6-variants")
         dlg.close()
+        # "Other variants…": the mod's files on GameBanana, installed one marked
+        first = mgr.lib.ordered()[0]
+        gbfiles = [GBFile(id=first.file_id, filename="yamato_blue_cd01a.rar", size=61_000_000, date_added=1_771_000_000,
+                          description="Blue outfit"),
+                   GBFile(id=first.file_id + 1, filename="yamato_red_cd01a.rar", size=61_200_000, date_added=1_771_000_000,
+                          description="Red outfit"),
+                   GBFile(id=first.file_id + 2, filename="yamato_gold_cd01a.rar", size=60_800_000, date_added=1_771_100_000,
+                          description="Gold outfit, also recolours the katana"),
+                   GBFile(id=first.file_id - 1, filename="yamato_blue_v1.rar", size=58_000_000, date_added=1_752_000_000,
+                          archived=True)]
+        fdlg = FileVariantDialog(gbfiles, first, win)
+        fdlg.show()
+        app.processEvents()
+        fdlg.grab().save(str(OUT / "6b-other-variants.png"))
+        print("saved 6b-other-variants; chosen:", fdlg.chosen().filename, "button:", fdlg.ok.text())
+        fdlg.tree.setCurrentItem(fdlg.tree.topLevelItem(0))
+        print("after selecting first row:", fdlg.chosen().filename, "button:", fdlg.ok.text())
+        fdlg.close()
         # verify the startup apply actually deployed files
         addons = sorted(p.name for p in (mgr.game_dir / "game/citadel/addons").iterdir())
         print("deployed:", addons)

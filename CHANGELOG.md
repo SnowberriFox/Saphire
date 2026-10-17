@@ -3,6 +3,17 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.4.2 — 2026-10-18
+
+### Fixed
+- **"Get other variants" showed nothing.** It re-downloaded the same file, and
+  most GameBanana mods ship each colour or style as a *separate* file, so there
+  was nothing new to show. The button is now **Other variants…**: it lists every
+  file the mod has on GameBanana (name, size, date, the author's notes, with
+  the installed one marked) and you pick the one to switch to. Picking the file
+  you already have downloads it again and keeps every VPK inside it, for mods
+  that bundle their variants in one file.
+
 ## 1.4.1 — 2026-10-18
 
 ### Added

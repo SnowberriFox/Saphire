@@ -311,16 +311,28 @@ class Manager:
             self.lib.save()
             self._dirty = True
 
-    def refetch(self, uid: str, choose: Chooser | None = None, progress: Progress | None = None,
-                cancel: threading.Event | None = None) -> InstalledMod:
-        """Download the mod's current file again to pick up every variant it ships."""
+    def variant_files(self, uid: str) -> list[GBFile]:
+        """Every file the mod has on GameBanana (colour options are usually separate files)."""
         mod = self.lib.mods[uid]
         if not (mod.source == "gamebanana" and mod.gb_id):
-            raise ManagerError("Only GameBanana mods can be fetched again.")
+            raise ManagerError("Only GameBanana mods have other files to choose from. "
+                               "Use Identify first to find this mod's page.")
         files = self.gb.files(mod.model, mod.gb_id)
-        target = next((f for f in files if f.id == mod.file_id), None) or newest_file(files)
-        if target is None:
+        if not files:
             raise ManagerError("No files available for this mod anymore.")
+        return files
+
+    def refetch(self, uid: str, file_id: int | None = None, choose: Chooser | None = None,
+                progress: Progress | None = None, cancel: threading.Event | None = None) -> InstalledMod:
+        """Download one of the mod's GameBanana files in place of the current one: the
+        same file again (to pick up every VPK it ships) or another variant file."""
+        mod = self.lib.mods[uid]
+        files = self.variant_files(uid)
+        want = file_id or mod.file_id
+        target = next((f for f in files if f.id == want), None)
+        if target is None and file_id:
+            raise ManagerError("That file isn't on GameBanana anymore. Pick another one.")
+        target = target or newest_file(files)
         return self.install_gamebanana(mod.model, mod.gb_id, target, choose, progress, cancel)
 
     def set_order(self, uids: list[str]) -> None:
