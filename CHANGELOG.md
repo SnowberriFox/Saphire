@@ -3,6 +3,14 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.4.1 — 2026-10-18
+
+### Added
+- **Switch variants without re-downloading.** Every VPK a download ships is now
+  kept in the library, and the Installed panel has a Variants section with a
+  tick box per part. Mods installed before this version only kept the parts you
+  chose; a "Get other variants" button fetches the rest once.
+
 ## 1.4.0 — 2026-10-18
 
 ### Added

@@ -60,7 +60,7 @@ def plan(mods: list[InstalledMod]) -> list[Placement]:
     for mod in mods:
         if not mod.enabled:
             continue
-        for vpk in mod.vpks:
+        for vpk in mod.active_vpks:
             folder_idx, slot = divmod(n, PER_FOLDER)
             if folder_idx >= MAX_FOLDERS:
                 raise DeployError(f"Too many enabled VPKs (limit {PER_FOLDER * MAX_FOLDERS}).")

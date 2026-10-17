@@ -138,7 +138,8 @@ def test_import_dmm_end_to_end(tmp_path, no7z):
     assert asked == []                                   # wanted_names picked the variant silently
     assert set(mgr.lib.mods) == {"gb-Mod-111", "gb-Mod-222", "gb-Sound-333"}
     hud = mgr.lib.mods["gb-Mod-222"]
-    assert hud.name == "Clean HUD (live name)" and [v.label for v in hud.vpks] == ["pak01_dir.vpk"]
+    assert hud.name == "Clean HUD (live name)" and [v.label for v in hud.active_vpks] == ["pak01_dir.vpk"]
+    assert len(hud.vpks) == 2    # the other variant is kept, switched off
     assert mgr.lib.order == ["gb-Mod-222", "gb-Mod-111", "gb-Sound-333"]   # DMM installOrder
     assert mgr.lib.mods["gb-Sound-333"].enabled is False
     assert set(mgr.lib.profiles) == {"Main", "Quiet"}

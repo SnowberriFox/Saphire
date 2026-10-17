@@ -256,7 +256,20 @@ def test_variant_chooser_and_update_keeps_choice(setup):
 
     mod = mgr.install_gamebanana("Mod", 3, choose=choose)
     assert asked == [["Blue/pak01_dir.vpk", "Red/pak01_dir.vpk"]]
-    assert [v.label for v in mod.vpks] == ["Red/pak01_dir.vpk"]
+    # every variant is kept in the library; only the chosen one is active
+    assert [(v.label, v.active) for v in mod.vpks] == [("Blue/pak01_dir.vpk", False), ("Red/pak01_dir.vpk", True)]
+    mgr.apply()
+    assert addons(game) == ["addons/pak01_dir.vpk"]
+    assert vpk.list_entries(game / "game/citadel/addons/pak01_dir.vpk") == ["ui/hud.png"]
+    assert (mod.folder / mod.vpks[0].main.stored).exists()
+    # switch variant without downloading anything
+    mgr.set_variants("gb-Mod-3", ["Blue/pak01_dir.vpk"])
+    assert [v.active for v in mgr.lib.mods["gb-Mod-3"].vpks] == [True, False]
+    mgr.apply()
+    assert addons(game) == ["addons/pak01_dir.vpk"]
+    with pytest.raises(Exception):
+        mgr.set_variants("gb-Mod-3", [])
+    mgr.set_variants("gb-Mod-3", ["Red/pak01_dir.vpk"])
 
     # author uploads a new version
     newer = GBFile(id=32, filename="three-v2.zip", date_added=200)
@@ -267,7 +280,7 @@ def test_variant_chooser_and_update_keeps_choice(setup):
     assert mgr.lib.mods["gb-Mod-3"].update.file_id == 32
     upd = mgr.update("gb-Mod-3", choose=lambda s, n: pytest.fail("should reuse Red"))
     assert upd.file_id == 32 and upd.update is None
-    assert [v.label for v in upd.vpks] == ["Red/pak01_dir.vpk"]
+    assert [(v.label, v.active) for v in upd.vpks] == [("Blue/pak01_dir.vpk", False), ("Red/pak01_dir.vpk", True)]
     assert mgr.check_updates() == []
 
 

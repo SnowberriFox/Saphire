@@ -93,7 +93,7 @@ def compute(mods_in_order: list[InstalledMod], index: VpkIndex) -> dict[str, Mod
         if not mod.enabled:
             continue
         seen: set[str] = set()
-        for vpk in mod.vpks:
+        for vpk in mod.active_vpks:
             for entry in index.entries(mod.file_path(vpk.main)):
                 if entry not in seen:
                     seen.add(entry)

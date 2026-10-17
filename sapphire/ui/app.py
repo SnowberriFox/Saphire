@@ -134,6 +134,7 @@ class MainWindow(QMainWindow):
         self.settings.appearance_changed.connect(self.apply_appearance)
         self.settings.discord_changed.connect(self.update_presence)
         self.installed.reapply_requested.connect(self.reapply)
+        self.installed.refetch_requested.connect(self.refetch_mod)
 
         self._apply_timer = QTimer(self, singleShot=True, interval=600)
         self._apply_timer.timeout.connect(self.apply_now)
@@ -573,6 +574,15 @@ class MainWindow(QMainWindow):
         def do(uid, choose=None, progress=None, cancel=None):
             return self.mgr.update(uid, choose=choose, progress=progress, cancel=cancel)
         self._queue(mod.name, do, uid, success="Updated {name}.", kind="update")
+
+    def refetch_mod(self, uid: str):
+        mod = self.mgr.lib.mods.get(uid)
+        if not mod:
+            return
+
+        def do(uid, choose=None, progress=None, cancel=None):
+            return self.mgr.refetch(uid, choose=choose, progress=progress, cancel=cancel)
+        self._queue(mod.name, do, uid, success="Fetched every variant of {name}.", kind="update")
 
     def update_all(self):
         for mod in [m for m in self.mgr.lib.ordered() if m.update]:

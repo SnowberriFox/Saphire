@@ -84,7 +84,8 @@ class Manager:
         return self._dirty
 
     # ------------------------------------------------------------------ storage
-    def _store(self, uid: str, sets: list[VpkSet]) -> list[StoredVpk]:
+    def _store(self, uid: str, sets: list[VpkSet], active: list[VpkSet] | None = None) -> list[StoredVpk]:
+        """Copy every set into the library; `active` (default: all) are the ones that get deployed."""
         lib = paths.library_dir()
         final = lib / uid
         staging = lib / f".{uid}.new"
@@ -100,7 +101,7 @@ class Manager:
                 name = f"{i:02d}_{_safe_name(f.name)}"
                 shutil.copy2(f, staging / name)
                 files.append(StoredFile(stored=name, chunk=chunk))
-            stored.append(StoredVpk(label=s.rel, files=files))
+            stored.append(StoredVpk(label=s.rel, files=files, active=(active is None or s in active)))
         if final.exists():
             final.rename(old)
         staging.rename(final)
@@ -108,29 +109,30 @@ class Manager:
         return stored
 
     def _pick_sets(self, extracted: Path, name: str, choose: Chooser | None,
-                   previous: list[str] | None = None) -> list[VpkSet]:
+                   previous: list[str] | None = None) -> tuple[list[VpkSet], list[VpkSet]]:
+        """Returns (every VPK set in the download, the ones to switch on)."""
         sets = find_sets(extracted)
         if not sets:
             raise ManagerError(
                 f"No VPK files found in the download for “{name}”. It may not be a "
                 "normal VPK mod; check its GameBanana page for install notes.")
         if len(sets) == 1:
-            return sets
-        if previous:  # updating: reuse the variant(s) picked last time if they still exist
+            return sets, sets
+        if previous:  # updating / re-fetching: keep the variant(s) picked last time if they still exist
             want = [p.lower() for p in previous]
             by_rel = {s.rel.lower(): s for s in sets}
             if all(p in by_rel for p in want):
-                return [by_rel[p] for p in want]
+                return sets, [by_rel[p] for p in want]
             by_name = {Path(s.rel).parent.name.lower() + "/" + s.main.name.lower(): s for s in sets}
-            keyed = [Path(p).parent.name + "/" + Path(p).name for p in want]
+            keyed = [Path(p).parent.name.lower() + "/" + Path(p).name.lower() for p in want]
             if all(k in by_name for k in keyed):
-                return [by_name[k] for k in keyed]
+                return sets, [by_name[k] for k in keyed]
         if choose is None:
-            return sets
+            return sets, sets
         picked = choose(sets, name)
         if not picked:
             raise Cancelled()
-        return picked
+        return sets, picked
 
     # ------------------------------------------------------------------ install
     def install_gamebanana(self, model: str, gb_id: int, file: GBFile | None = None,
@@ -154,10 +156,10 @@ class Manager:
             if progress:
                 progress("Extracting", 0, 0)
             extracted = archive.extract(dl, work / "x")
-            previous = [v.label for v in existing.vpks] if existing and existing.file_id != file.id else None
-            sets = self._pick_sets(extracted, sub.name, choose, previous)
+            previous = [v.label for v in existing.active_vpks] if existing else None
+            sets, chosen = self._pick_sets(extracted, sub.name, choose, previous)
             with self.lock:
-                stored = self._store(uid, sets)
+                stored = self._store(uid, sets, chosen)
                 now = int(time.time())
                 mod = InstalledMod(
                     uid=uid, name=sub.name, source="gamebanana", model=model, gb_id=gb_id,
@@ -186,9 +188,9 @@ class Manager:
         work = Path(tempfile.mkdtemp(prefix="import-", dir=paths.cache_dir()))
         try:
             extracted = archive.extract(path, work / "x")
-            sets = self._pick_sets(extracted, name, choose)
+            sets, chosen = self._pick_sets(extracted, name, choose)
             with self.lock:
-                stored = self._store(uid, sets)
+                stored = self._store(uid, sets, chosen)
                 now = int(time.time())
                 mod = InstalledMod(uid=uid, name=existing.name if existing else name,
                                    source="local", file_name=path.name, vpks=stored,
@@ -293,6 +295,33 @@ class Manager:
                 self.lib.mods[uid].enabled = enabled
                 self.lib.save()
                 self._dirty = True
+
+    def set_variants(self, uid: str, active_labels: list[str]) -> None:
+        """Choose which of a mod's stored VPKs are deployed (at least one)."""
+        with self.lock:
+            mod = self.lib.mods.get(uid)
+            if not mod:
+                return
+            want = {l.lower() for l in active_labels}
+            flags = [v.label.lower() in want for v in mod.vpks]
+            if not any(flags):
+                raise ManagerError("Keep at least one part on, or turn the whole mod off instead.")
+            for v, on in zip(mod.vpks, flags):
+                v.active = on
+            self.lib.save()
+            self._dirty = True
+
+    def refetch(self, uid: str, choose: Chooser | None = None, progress: Progress | None = None,
+                cancel: threading.Event | None = None) -> InstalledMod:
+        """Download the mod's current file again to pick up every variant it ships."""
+        mod = self.lib.mods[uid]
+        if not (mod.source == "gamebanana" and mod.gb_id):
+            raise ManagerError("Only GameBanana mods can be fetched again.")
+        files = self.gb.files(mod.model, mod.gb_id)
+        target = next((f for f in files if f.id == mod.file_id), None) or newest_file(files)
+        if target is None:
+            raise ManagerError("No files available for this mod anymore.")
+        return self.install_gamebanana(mod.model, mod.gb_id, target, choose, progress, cancel)
 
     def set_order(self, uids: list[str]) -> None:
         with self.lock:

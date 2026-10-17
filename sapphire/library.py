@@ -30,6 +30,7 @@ class StoredFile:
 class StoredVpk:
     label: str                       # path inside the original archive, e.g. "Blue/pak01_dir.vpk"
     files: list[StoredFile] = field(default_factory=list)
+    active: bool = True              # variants you haven't picked stay in the library, switched off
 
     @property
     def main(self) -> StoredFile:
@@ -72,10 +73,14 @@ class InstalledMod:
     def file_path(self, f: StoredFile) -> Path:
         return self.folder / f.stored
 
+    @property
+    def active_vpks(self) -> list[StoredVpk]:
+        return [v for v in self.vpks if v.active]
+
     @classmethod
     def from_dict(cls, d: dict) -> "InstalledMod":
         d = dict(d)
-        vpks = [StoredVpk(label=v.get("label", ""),
+        vpks = [StoredVpk(label=v.get("label", ""), active=bool(v.get("active", True)),
                           files=[StoredFile(**f) for f in v.get("files", [])])
                 for v in d.pop("vpks", [])]
         upd = d.pop("update", None)

@@ -250,6 +250,14 @@ def main():
         QTimer.singleShot(1500, lambda: (shot("2-installed"), conflicts()))
 
     def conflicts():
+        # give one mod a second (inactive) variant so the Variants section shows
+        from sapphire.library import StoredFile, StoredVpk
+        m = mgr.lib.mods[ALL[12].key]
+        extra = make_vpk(m.folder / "01_alt.vpk", {"sounds/orbs/pickup.vsnd_c": b"alt"})
+        m.vpks.append(StoredVpk(label="Loud/pak01_dir.vpk", files=[StoredFile(stored="01_alt.vpk")], active=False))
+        m.vpks[0].label = "Quiet/pak01_dir.vpk"
+        mgr.lib.save()
+        win.installed.reload()
         win.installed.list.setCurrentRow(3)
         QTimer.singleShot(800, lambda: (shot("3-installed-conflict"), installed_list()))
 

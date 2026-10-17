@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QPainter, QPainterPath, QPen, QPolygonF
-from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QFrame, QHBoxLayout, QLabel, QLineEdit,
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMenu, QPushButton, QScrollArea, QSizePolicy,
                                QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget,
                                QTreeWidgetItem, QVBoxLayout, QWidget)
@@ -364,6 +364,17 @@ class DetailPanel(QScrollArea):
         page.images.loaded.connect(self._image_loaded)
         self.show_mod(None)
 
+    def _variants_changed(self, uid: str):
+        from sapphire.ui.dialogs import error
+        labels = [label for label, cb in self._variant_boxes if cb.isChecked()]
+        try:
+            self.page.mgr.set_variants(uid, labels)
+        except Exception as exc:  # noqa: BLE001
+            error(self, "Keep one on", str(exc))
+            self.show_mod(uid)
+            return
+        self.page.changed.emit()
+
     def _image_loaded(self, url: str):
         mod = self.page.mgr.lib.mods.get(self.uid) if self.uid else None
         if mod and mod.thumb_url == url:
@@ -457,14 +468,30 @@ class DetailPanel(QScrollArea):
             u.setWordWrap(True)
             self.lay.addWidget(u)
 
-        if len(mod.vpks) > 1 or (mod.vpks and "/" in mod.vpks[0].label):
-            h = QLabel("Installed parts")
+        if len(mod.vpks) > 1:
+            h = QLabel("Variants")
             h.setObjectName("SideTitle")
             self.lay.addWidget(h)
-            parts = QLabel("\n".join(v.label for v in mod.vpks))
-            parts.setObjectName("Muted")
-            parts.setWordWrap(True)
-            self.lay.addWidget(parts)
+            vhint = QLabel("Everything this download shipped is kept. Tick the parts you want in the game; "
+                           "switching needs no download.")
+            vhint.setObjectName("Muted")
+            vhint.setWordWrap(True)
+            self.lay.addWidget(vhint)
+            self._variant_boxes = []
+            for v in mod.vpks:
+                label = v.label.rsplit("/", 1)[0] if "/" in v.label else v.label
+                cb = QCheckBox(label)
+                cb.setToolTip(v.label)
+                cb.setChecked(v.active)
+                cb.toggled.connect(lambda _on, u=mod.uid: self._variants_changed(u))
+                self.lay.addWidget(cb)
+                self._variant_boxes.append((v.label, cb))
+        elif mod.source == "gamebanana" and mod.vpks:
+            fetch = QPushButton("Get other variants")
+            fetch.setToolTip("Downloads this mod's file again and keeps every variant it ships, so you can "
+                             "switch between them here without downloading again")
+            fetch.clicked.connect(lambda: self.page.refetch_requested.emit(mod.uid))
+            self.lay.addWidget(fetch, 0, Qt.AlignLeft)
 
         h = QLabel("Conflicts")
         h.setObjectName("SideTitle")
@@ -523,6 +550,7 @@ class InstalledPage(QWidget):
     add_file_requested = Signal()
     identify_requested = Signal(object)   # list of uids, or None for all unknown
     reapply_requested = Signal()
+    refetch_requested = Signal(str)   # uid
     removed = Signal(str)
     status = Signal(str)
 
