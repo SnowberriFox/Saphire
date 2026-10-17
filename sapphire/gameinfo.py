@@ -27,6 +27,7 @@ MARK_END = "// <<< Sapphire <<<"
 
 # Markers other managers leave behind; used to clean up their patches.
 FOREIGN_MARKERS = ("deadlock mod manager", "grimoire", "mod manager - start", "mod manager - end")
+FOREIGN_PATHS = ("citadel/addons", "citadel/grimoire", "citadel/deadworks_addons")
 
 
 class GameInfoError(Exception):
@@ -109,7 +110,7 @@ def inspect(text: str) -> GameInfoStatus:
             if kv and kv[0] == "game":
                 status.folders.append(kv[1])
         else:
-            if kv and kv[1].startswith("citadel/addons"):
+            if kv and kv[1].startswith(FOREIGN_PATHS):
                 status.foreign = True
             if stripped.startswith("//") and any(m in stripped.lower() for m in FOREIGN_MARKERS):
                 status.foreign = True
@@ -142,7 +143,7 @@ def _clean_block(block: list[str], foreign: bool) -> list[str]:
             kv = _kv(line)
             if kv:
                 key, value = kv
-                if value.startswith("citadel/addons"):
+                if value.startswith(FOREIGN_PATHS):
                     continue
                 # Vanilla Deadlock has no Mod/Write keys; other managers add them.
                 if key in ("mod", "write"):

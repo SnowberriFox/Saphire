@@ -133,6 +133,29 @@ class FakeClient(GameBananaClient):
 def build_state(mgr: Manager):
     game = make_game(tmp / "steam" / "steamapps" / "common")
     mgr.set_game_dir(game)
+    # a fake Grimoire install so the import dialog has something to show
+    import json
+    gdata = Path(os.environ["HOME"]) / ".config" / "Grimoire"
+    gdata.mkdir(parents=True)
+    citadel = game / "game" / "citadel"
+    make_vpk(citadel / "addons" / "pak01_dir.vpk", {"models/vindicta.vmdl_c": b"v" * 3000})
+    make_vpk(citadel / "addons" / "pak02_dir.vpk", {"hud/minimal.vxml_c": b"h" * 900})
+    make_vpk(citadel / "addons" / ".disabled" / "jade_lash.vpk", {"models/lash.vmdl_c": b"l" * 1200})
+    (gdata / "mod-metadata.json").write_text(json.dumps({
+        "pak01_dir.vpk": {"modName": "Vindicta Nightjar", "author": "nightjarr", "gameBananaId": 600003,
+                          "gameBananaFileId": 6000032, "categoryName": "Vindicta"},
+        "pak02_dir.vpk": {"modName": "Minimal HUD", "gameBananaId": 600010, "gameBananaFileId": 6000102},
+        "jade_lash.vpk": {"modName": "Jade Lash", "author": "ossuary_ink", "gameBananaId": 600007},
+    }))
+    (gdata / "profiles.json").write_text(json.dumps([{"id": "x", "name": "Grimoire ranked", "mods": [
+        {"fileName": "pak01_dir.vpk", "enabled": True, "priority": 0, "gameBananaId": 600003, "gameBananaFileId": 6000032},
+        {"fileName": "jade_lash.vpk", "enabled": True, "priority": 1, "gameBananaId": 600007}]}]))
+    dmm = Path(os.environ["HOME"]) / ".local/share/dev.stormix.deadlock-mod-manager"
+    dmm.mkdir(parents=True)
+    (dmm / "state.json").write_text(json.dumps({"local-config": {"state": {"localMods": [
+        {"remoteId": "600005", "name": "Seven Storm Coat", "installOrder": 0,
+         "selectedDownloads": [{"url": "https://gamebanana.com/dl/6000052", "name": "seven_storm.zip"}]}],
+        "profiles": {}}}}))
     work = tmp / "mods"
     specs = [
         (ALL[0], {"models/heroes/haze/haze.vmdl_c": b"a", "materials/haze/skin.vmat_c": b"a"}),
@@ -233,7 +256,23 @@ def main():
 
     def settings():
         win.go(3)
-        QTimer.singleShot(400, lambda: (shot("5-settings"), variants()))
+        QTimer.singleShot(400, lambda: (shot("5-settings"), importdlg()))
+
+    def importdlg():
+        from sapphire.ui.importing import ImportDialog
+        dlg = ImportDialog(mgr, "grimoire", win)
+        dlg.show()
+
+        def wait(n=0):
+            app.processEvents()
+            if dlg.plan is None and n < 50:
+                return QTimer.singleShot(100, lambda: wait(n + 1))
+            app.processEvents()
+            dlg.grab().save(str(OUT / "7-import-grimoire.png"))
+            print("saved 7-import-grimoire; plan mods:", [m.name for m in dlg.plan.mods] if dlg.plan else None)
+            dlg.close()
+            variants()
+        wait()
 
     def variants():
         d = tmp / "variants"

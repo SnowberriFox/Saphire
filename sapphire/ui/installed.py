@@ -256,6 +256,11 @@ class DetailPanel(QScrollArea):
             gb = QPushButton("GameBanana")
             gb.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(mod.url)))
             row.addWidget(gb)
+        if mod.source == "local":
+            ident = QPushButton("Identify")
+            ident.setToolTip("Find this mod's GameBanana page so it gets a name, thumbnail and updates")
+            ident.clicked.connect(lambda: self.page.identify_requested.emit([mod.uid]))
+            row.addWidget(ident)
         self.lay.addLayout(row)
         if mod.update:
             u = QLabel(f"New file: {mod.update.file_name} ({fmt_date(mod.update.date)})")
@@ -327,6 +332,7 @@ class InstalledPage(QWidget):
     update_all_requested = Signal()
     check_updates_requested = Signal()
     add_file_requested = Signal()
+    identify_requested = Signal(object)   # list of uids, or None for all unknown
     removed = Signal(str)
     status = Signal(str)
 
@@ -370,11 +376,14 @@ class InstalledPage(QWidget):
         self.add_btn = QPushButton("Add a file…")
         self.add_btn.setToolTip("Install a .zip, .7z, .rar or .vpk from your computer")
         self.add_btn.clicked.connect(self.add_file_requested)
+        self.identify_btn = QPushButton("Identify unknown")
+        self.identify_btn.setToolTip("Match mods that were added by hand to their GameBanana page")
+        self.identify_btn.clicked.connect(lambda: self.identify_requested.emit(None))
         all_on = QPushButton("All on")
         all_on.clicked.connect(lambda: self.set_all(True))
         all_off = QPushButton("All off")
         all_off.clicked.connect(lambda: self.set_all(False))
-        for b in (self.check_btn, self.update_all_btn, self.add_btn):
+        for b in (self.check_btn, self.update_all_btn, self.add_btn, self.identify_btn):
             actions.addWidget(b)
         actions.addStretch(1)
         actions.addWidget(all_on)
@@ -434,6 +443,7 @@ class InstalledPage(QWidget):
         self.count.setText(f"{len(on)} on, {len(mods) - len(on)} off" if mods else "")
         self.update_all_btn.setText(f"Update all ({n_upd})" if n_upd else "Update all")
         self.update_all_btn.setVisible(n_upd > 0)
+        self.identify_btn.setVisible(any(m.source == "local" for m in mods))
         self.empty.setVisible(not mods)
         self.list.setVisible(bool(mods))
         self.list.viewport().update()

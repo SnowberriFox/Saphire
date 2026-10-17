@@ -47,6 +47,19 @@ To uninstall: `./uninstall.sh` (keeps your mod library) or `./uninstall.sh --pur
 
 You can also drag `.zip`, `.7z`, `.rar` or `.vpk` files onto the window to add them.
 
+- **Identify unknown**: a mod added by hand (or found in your addons folder) shows
+  as a "Manual install". Identify fingerprints the VPK and looks it up in the
+  community hash index that Deadlock Mod Manager runs, so it gets its real name,
+  thumbnail, GameBanana link and update checks. Nothing but file hashes is sent.
+- **Switching from Deadlock Mod Manager or Grimoire**: Settings → Import. Sapphire
+  reads their records (DMM's `state.json` and download cache; Grimoire's
+  `mod-metadata.json` and `profiles.json`), copies the mods into its library with
+  their names and GameBanana IDs, keeps the load order and on/off state, and
+  recreates each profile. Mods whose files are gone are re-downloaded from
+  GameBanana. Neither manager's data is changed. Even without importing, files
+  those managers left in the addons folder are adopted with their proper names
+  the first time you apply.
+
 If a download contains several VPKs (colour variants, optional parts), Sapphire
 asks which ones you want and remembers your choice for future updates.
 
@@ -106,7 +119,9 @@ Code map:
 | `sapphire/archive.py` | Safe extraction of zip/7z/rar |
 | `sapphire/deploy.py` | Turns the load order into files in `addons*` |
 | `sapphire/library.py` | Saved state: mods, order, profiles (atomic JSON) |
-| `sapphire/core.py` | The manager: install, update, apply, profiles |
+| `sapphire/identify.py` | Fingerprints a VPK and asks the hash index which mod it is |
+| `sapphire/importers.py` | Reads Deadlock Mod Manager and Grimoire data into an import plan |
+| `sapphire/core.py` | The manager: install, update, apply, profiles, import, identify |
 | `sapphire/ui/` | The Qt interface (`onboarding.py` is the first-run wizard) |
 
 Data lives in `~/.local/share/sapphire` (`SAPPHIRE_HOME` overrides it, handy for

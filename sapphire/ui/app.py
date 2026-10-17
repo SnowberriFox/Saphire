@@ -22,6 +22,7 @@ from sapphire.ui import theme
 from sapphire.ui.browse import BrowsePage
 from sapphire.ui.dialogs import choose_variants, confirm, error
 from sapphire.ui.images import ImageCache
+from sapphire.ui.importing import ImportDialog
 from sapphire.ui.installed import InstalledPage
 from sapphire.ui.onboarding import OnboardingDialog
 from sapphire.ui.pages import ProfilesPage, SettingsPage
@@ -89,6 +90,7 @@ class MainWindow(QMainWindow):
         self.installed.update_all_requested.connect(self.update_all)
         self.installed.check_updates_requested.connect(lambda: self.check_updates(manual=True))
         self.installed.add_file_requested.connect(self.add_files)
+        self.installed.identify_requested.connect(self.identify)
         self.installed.removed.connect(lambda _u: self._library_changed())
         self.profiles.changed.connect(self._profile_switched)
         self.settings.game_dir_changed.connect(self._game_dir_changed)
@@ -96,6 +98,7 @@ class MainWindow(QMainWindow):
         self.settings.fix_gameinfo.connect(lambda: self.check_gameinfo(manual=True))
         self.settings.reset_requested.connect(self.reset_vanilla)
         self.settings.setup_requested.connect(self.run_setup)
+        self.settings.import_requested.connect(self.import_from)
 
         self._apply_timer = QTimer(self, singleShot=True, interval=600)
         self._apply_timer.timeout.connect(self.apply_now)
@@ -261,6 +264,7 @@ class MainWindow(QMainWindow):
 
     def run_setup(self, first: bool = False):
         dlg = OnboardingDialog(self.mgr, self)
+        dlg.import_requested.connect(self.import_from)
         finished = dlg.exec() == QDialog.Accepted
         if finished or first:
             # Skipping the first run still counts: nobody wants the wizard every launch.
@@ -485,6 +489,73 @@ class MainWindow(QMainWindow):
         def do(path, choose=None, progress=None, cancel=None):
             return self.mgr.install_local(path, choose=choose)
         self._queue(path.name, do, path, success="Added {name}.")
+
+    def import_from(self, which: str):
+        dlg = ImportDialog(self.mgr, which, self)
+        if dlg.exec() != QDialog.Accepted or dlg.plan is None:
+            return
+        plan = dlg.plan
+        label = f"Import from {plan.source}"
+        job = Job(label)
+        self._job_started(job)
+
+        def progress(stage, done, total):
+            if self.jobs and self.jobs[0] is job:
+                self._jobs_ui(done, total, stage)
+
+        def worker(progress=None):
+            return self.mgr.run_import(plan, choose=self._chooser, progress=progress, cancel=job.cancel)
+
+        def done(res):
+            self._job_finished(job)
+            self._library_changed()
+            self.request_apply()
+            msg = (f"Imported {res['imported']} mod{'s' if res['imported'] != 1 else ''}"
+                   + (f" and {res['profiles']} profile{'s' if res['profiles'] != 1 else ''}" if res['profiles'] else "")
+                   + f" from {plan.source}.")
+            if res["failed"]:
+                msg += f" {res['failed']} failed; see the log."
+            self.say(msg, 20000)
+            unknown = [m.uid for m in self.mgr.lib.mods.values() if m.source == "local"]
+            if unknown:
+                self.identify(unknown)
+
+        def failed(exc):
+            self._job_finished(job)
+            if isinstance(exc, Cancelled):
+                self.say("Import cancelled.")
+            else:
+                error(self, "Import failed", str(exc))
+            self._library_changed()
+
+        run(worker, on_done=done, on_error=failed, on_progress=progress, pool=JOB_POOL)
+
+    def identify(self, uids=None):
+        targets = [m for m in self.mgr.lib.mods.values() if m.source == "local" and (uids is None or m.uid in uids)]
+        if not targets:
+            self.say("Nothing to identify: every mod is already linked to GameBanana.")
+            return
+        self.installed.identify_btn.setEnabled(False)
+        self.installed.identify_btn.setText("Identifying…")
+
+        def done(results):
+            self.installed.identify_btn.setEnabled(True)
+            self.installed.identify_btn.setText("Identify unknown")
+            found = sum(1 for _u, m in results if m)
+            self._library_changed()
+            self.request_apply()
+            if found:
+                self.say(f"Identified {found} of {len(results)} mod{'s' if len(results) != 1 else ''}.", 15000)
+            else:
+                self.say(f"None of the {len(results)} unknown mod{'s' if len(results) != 1 else ''} matched a "
+                         "GameBanana file.", 15000)
+
+        def failed(exc):
+            self.installed.identify_btn.setEnabled(True)
+            self.installed.identify_btn.setText("Identify unknown")
+            error(self, "Couldn't identify mods", str(exc))
+
+        run(self.mgr.identify, uids, on_done=done, on_error=failed)
 
     def check_updates(self, manual: bool = False):
         if manual:

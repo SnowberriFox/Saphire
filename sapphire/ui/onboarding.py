@@ -159,6 +159,8 @@ class GameStep(Step):
 
 
 class ExistingStep(Step):
+    import_requested = Signal(str)
+
     def __init__(self, manager):
         super().__init__("Existing mods",
                          "If you've installed mods by hand or with another manager, Sapphire can take them "
@@ -179,6 +181,18 @@ class ExistingStep(Step):
         row.addWidget(self.skip_btn)
         row.addStretch(1)
         self.lay.addLayout(row)
+        self.other_label = QLabel()
+        self.other_label.setWordWrap(True)
+        self.lay.addWidget(self.other_label)
+        orow = QHBoxLayout()
+        self.dmm_btn = QPushButton("Import from Deadlock Mod Manager…")
+        self.dmm_btn.clicked.connect(lambda: self.import_requested.emit("dmm"))
+        self.grim_btn = QPushButton("Import from Grimoire…")
+        self.grim_btn.clicked.connect(lambda: self.import_requested.emit("grimoire"))
+        orow.addWidget(self.dmm_btn)
+        orow.addWidget(self.grim_btn)
+        orow.addStretch(1)
+        self.lay.addLayout(orow)
         self.lay.addStretch(1)
         self.paks: list[Path] = []
 
@@ -201,10 +215,21 @@ class ExistingStep(Step):
         if foreign:
             lines.append("gameinfo.gi was edited by another mod manager (or by hand). Sapphire will tidy "
                          "that up when it applies mods; your mods keep working.")
+        found = self.mgr.detect_other_managers()
+        others = [n for k, n in (("dmm", "Deadlock Mod Manager"), ("grimoire", "Grimoire")) if found.get(k)]
+        if others:
+            self.other_label.setText("Also found " + " and ".join(others) + " on this computer. You can bring "
+                                     "over its mods, load order and profiles now, or later from Settings.")
+        else:
+            self.other_label.setText("")
+        self.dmm_btn.setVisible(bool(found.get("dmm")))
+        self.grim_btn.setVisible(bool(found.get("grimoire")))
         if not lines:
-            lines.append("No existing mods found. You're starting fresh.")
+            lines.append("No existing mods found. You're starting fresh." if not others else "")
             self.set_ready(True)
-        self.found_label.setText("\n".join(lines))
+        if others and not self.paks:
+            self.set_ready(True)
+        self.found_label.setText("\n".join(l for l in lines if l))
         has = bool(self.paks)
         self.import_btn.setVisible(has)
         self.skip_btn.setVisible(has)
@@ -269,6 +294,8 @@ class ConnectionStep(Step):
 
 
 class OnboardingDialog(QDialog):
+    import_requested = Signal(str)
+
     def __init__(self, manager, parent=None):
         super().__init__(parent)
         self.mgr = manager
@@ -301,6 +328,7 @@ class OnboardingDialog(QDialog):
         for s in self.steps:
             self.stack.addWidget(s)
             s.ready_changed.connect(lambda _r: self._sync())
+        self.steps[2].import_requested.connect(self._import)
         root.addWidget(self.stack, 1)
 
         nav = QHBoxLayout()
@@ -334,6 +362,11 @@ class OnboardingDialog(QDialog):
         self.next.setText("Finish" if last else "Next")
         self.next.setEnabled(self.steps[self.index].ready)
         self.skip.setVisible(not last)
+
+    def _import(self, which: str):
+        # The main window runs the import (it owns the job queue); come back to this step after.
+        self.import_requested.emit(which)
+        self.steps[2].set_ready(True)
 
     def _next(self):
         if self.index == len(self.steps) - 1:

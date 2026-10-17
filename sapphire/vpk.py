@@ -24,8 +24,21 @@ class VpkError(ValueError):
     pass
 
 
+@dataclass
+class Entry:
+    path: str          # as stored, e.g. "models/heroes/haze/haze.vmdl_c"
+    crc: int
+    length: int        # bytes in the data archive (not counting preload)
+    preload: int
+
+
 def list_entries(path: Path | str) -> list[str]:
     """Return every file path stored in the VPK, lower-cased, '/' separated."""
+    return [e.path.lower() for e in read_entries(path)]
+
+
+def read_entries(path: Path | str) -> list[Entry]:
+    """Return every entry in the VPK's directory tree (paths as stored)."""
     with open(path, "rb") as fh:
         header = fh.read(12)
         if len(header) < 12:
@@ -45,9 +58,9 @@ def list_entries(path: Path | str) -> list[str]:
     return _parse_tree(tree)
 
 
-def _parse_tree(tree: bytes) -> list[str]:
+def _parse_tree(tree: bytes) -> list[Entry]:
     pos = 0
-    out: list[str] = []
+    out: list[Entry] = []
 
     def read_str() -> str:
         nonlocal pos
@@ -72,7 +85,7 @@ def _parse_tree(tree: bytes) -> list[str]:
                     break
                 if pos + _ENTRY.size > len(tree):
                     raise VpkError("VPK tree is corrupt")
-                _crc, preload, _idx, _off, _len, term = _ENTRY.unpack_from(tree, pos)
+                crc, preload, _idx, _off, length, term = _ENTRY.unpack_from(tree, pos)
                 if term != 0xFFFF:
                     raise VpkError("VPK tree is corrupt (bad terminator)")
                 pos += _ENTRY.size + preload
@@ -81,7 +94,7 @@ def _parse_tree(tree: bytes) -> list[str]:
                     parts.append(directory.strip().strip("/"))
                 filename = name if ext.strip() == "" else f"{name}.{ext}"
                 parts.append(filename)
-                out.append("/".join(parts).lower())
+                out.append(Entry(path="/".join(parts), crc=crc, length=length, preload=preload))
     return out
 
 

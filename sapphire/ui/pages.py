@@ -153,6 +153,7 @@ class SettingsPage(QWidget):
     reset_requested = Signal()
     fix_gameinfo = Signal()
     setup_requested = Signal()
+    import_requested = Signal(str)
 
     def __init__(self, manager):
         super().__init__()
@@ -206,6 +207,21 @@ class SettingsPage(QWidget):
         g.addWidget(reset)
         root.addLayout(g)
 
+        root.addWidget(_section("Switching from another mod manager"))
+        imp = QHBoxLayout()
+        self.dmm_btn = QPushButton("Import from Deadlock Mod Manager…")
+        self.dmm_btn.clicked.connect(lambda: self.import_requested.emit("dmm"))
+        self.grim_btn = QPushButton("Import from Grimoire…")
+        self.grim_btn.clicked.connect(lambda: self.import_requested.emit("grimoire"))
+        imp.addWidget(self.dmm_btn)
+        imp.addWidget(self.grim_btn)
+        imp.addStretch(1)
+        root.addLayout(imp)
+        self.import_hint = QLabel()
+        self.import_hint.setObjectName("Muted")
+        self.import_hint.setWordWrap(True)
+        root.addWidget(self.import_hint)
+
         root.addWidget(_section("Sapphire"))
         d = QHBoxLayout()
         setup = QPushButton("Run setup again")
@@ -229,6 +245,12 @@ class SettingsPage(QWidget):
 
     def refresh(self):
         gd = self.mgr.game_dir
+        found = self.mgr.detect_other_managers()
+        names = [n for k, n in (("dmm", "Deadlock Mod Manager"), ("grimoire", "Grimoire")) if found.get(k)]
+        self.import_hint.setText(("Found data from " + " and ".join(names) + ". Importing copies the mods and "
+                                  "profiles into Sapphire; nothing is deleted.") if names else
+                                 "Brings over installed mods, their order and your profiles. Neither manager's "
+                                 "data was found on this computer, but you can still try.")
         self.path.setText(str(gd) if gd else "")
         if gd:
             self.path_hint.setText("Found. Mods go into game/citadel/addons.")

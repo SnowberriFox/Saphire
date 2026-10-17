@@ -13,9 +13,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable
 
-from sapphire import archive, conflicts, deploy, gameinfo, paths, steam
+from sapphire import archive, conflicts, deploy, gameinfo, identify, importers, paths, steam
 from sapphire.gamebanana import Cancelled, GameBananaClient, GameBananaError, GBFile, newest_file
-from sapphire.library import InstalledMod, Library, StoredFile, StoredVpk, UpdateInfo
+from sapphire.library import InstalledMod, Library, Profile, StoredFile, StoredVpk, UpdateInfo
 from sapphire.vpk import VpkSet, chunk_index, find_sets
 
 log = logging.getLogger(__name__)
@@ -49,6 +49,7 @@ class Manager:
         self.gb = client or GameBananaClient()
         self.lock = threading.RLock()
         self.vpk_index = conflicts.VpkIndex()
+        self.identifier = identify.Identifier(self.gb.session)
         self._dirty = False  # changes waiting to be applied (e.g. game was running)
 
     # ------------------------------------------------------------------ game dir
@@ -202,19 +203,48 @@ class Manager:
             shutil.rmtree(work, ignore_errors=True)
 
     def import_unmanaged(self) -> list[InstalledMod]:
-        """Adopt VPKs someone put in addons by hand so deploying never deletes them."""
+        """Adopt VPKs someone put in addons by hand (or another manager) so deploying
+        never deletes them. Files another manager knows about keep their names."""
         try:
             citadel = self.citadel()
         except NoGame:
             return []
         found = deploy.unmanaged_paks(citadel, self.lib.deployed)
-        added = []
+        if not found:
+            return []
+        try:
+            owners = importers.live_owners(citadel)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("couldn't read other managers' records: %s", exc)
+            owners = {}
+        added: list[InstalledMod] = []
+        taken: set[Path] = set()
+        found_set = {p.resolve() for p in found}
+        # 1. Files another manager has metadata for, grouped the way it grouped them.
+        for rel in list(owners):
+            m = owners[rel]
+            mains = [v.main.resolve() for v in m.vpks]
+            if not mains or any(p not in found_set for p in mains) or any(p in taken for p in mains):
+                continue
+            for v in m.vpks:
+                v.chunks = self._chunks_beside(v.main)
+            try:
+                uid = self._adopt_import(m)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("adopting %s failed: %s", m.name, exc)
+                continue
+            mod = self.lib.mods[uid]
+            mod.note = "Found in your addons folder; details came from the manager that installed it."
+            added.append(mod)
+            for v in m.vpks:
+                taken.add(v.main.resolve())
+                for f in (v.main, *v.chunks):
+                    self.lib.deployed[f.resolve().relative_to(citadel.resolve()).as_posix()] = {"src": "", "size": -1}
+        # 2. Everything else becomes a plain manual install.
         for main in found:
-            stem = main.name[: -len("_dir.vpk")]
-            chunks = sorted(p for p in main.parent.iterdir()
-                            if p.name.lower().startswith(stem.lower() + "_")
-                            and p.name.lower() != main.name.lower()
-                            and chunk_index(p) is not None)
+            if main.resolve() in taken:
+                continue
+            chunks = self._chunks_beside(main)
             digest = hashlib.sha1(f"{main.parent.name}/{main.name}:{main.stat().st_size}".encode()).hexdigest()[:10]
             uid = f"local-{digest}"
             vset = VpkSet(main=main, chunks=chunks, rel=f"{main.parent.name}/{main.name}")
@@ -223,7 +253,8 @@ class Manager:
                 mod = InstalledMod(uid=uid, name=f"Manual install ({main.parent.name}/{main.name})",
                                    source="local", file_name=main.name, vpks=stored, enabled=True,
                                    installed_at=int(time.time()),
-                                   note="Found in your addons folder and adopted by Sapphire.")
+                                   note="Found in your addons folder and adopted by Sapphire. "
+                                        "Use Identify to find its GameBanana page.")
                 self.lib.add(mod, top=False)
                 # Mark the original as ours so it isn't adopted twice.
                 self.lib.deployed[f"{main.parent.name}/{main.name}"] = {"src": "", "size": -1}
@@ -233,6 +264,13 @@ class Manager:
             self._dirty = True
             log.info("adopted %d unmanaged VPKs", len(added))
         return added
+
+    @staticmethod
+    def _chunks_beside(main: Path) -> list[Path]:
+        stem = main.name[: -len("_dir.vpk")] if main.name.lower().endswith("_dir.vpk") else main.stem
+        return sorted(p for p in main.parent.iterdir()
+                      if p.is_file() and p.name.lower().startswith(stem.lower() + "_")
+                      and p.name.lower() != main.name.lower() and chunk_index(p) is not None)
 
     # ------------------------------------------------------------------- edits
     def remove(self, uid: str) -> None:
@@ -344,7 +382,7 @@ class Manager:
                     log.warning("update check failed: %s", exc)
                     continue
                 with self.lock:
-                    if latest and latest.id != mod.file_id and latest.date_added >= mod.file_date:
+                    if latest and mod.file_id and latest.id != mod.file_id and latest.date_added >= mod.file_date:
                         mod.update = UpdateInfo(latest.id, latest.filename, latest.date_added)
                         found.append(mod)
                     else:
@@ -404,3 +442,180 @@ class Manager:
             if self.lib.active_profile == old:
                 self.lib.active_profile = new
             self.lib.save()
+
+
+    # ------------------------------------------------------------- identify
+    def identify(self, uids: list[str] | None = None,
+                 progress: Callable[[int, int], None] | None = None) -> list[tuple[str, identify.Match | None]]:
+        """Match local (unknown) mods to GameBanana. Re-keys the ones it recognises."""
+        targets = [m for m in self.lib.ordered() if m.source == "local" and m.vpks
+                   and (uids is None or m.uid in uids)]
+        results: list[tuple[str, identify.Match | None]] = []
+        for i, mod in enumerate(targets):
+            if progress:
+                progress(i, len(targets))
+            match = self.identifier.lookup(mod.file_path(mod.vpks[0].main))
+            if match:
+                self._adopt_match(mod, match)
+            results.append((mod.uid, match))
+        if progress:
+            progress(len(targets), len(targets))
+        return results
+
+    def _adopt_match(self, mod: InstalledMod, match: identify.Match) -> None:
+        new_uid = f"gb-{match.model}-{match.gb_id}"
+        name, author, category, thumb, url = match.name, match.author, "", "", ""
+        file_name, file_date = "", 0
+        try:
+            d = self.gb.details(match.model, match.gb_id)
+            name = d.submission.name or name
+            author = d.submission.author or author
+            category, thumb, url = d.submission.category_label, d.submission.thumb_url, d.submission.url
+            if match.file_id:
+                f = next((f for f in d.files if f.id == match.file_id), None)
+                if f:
+                    file_name, file_date = f.filename, f.date_added
+        except GameBananaError as exc:
+            log.warning("identified %s as %s but couldn't fetch details: %s", mod.uid, new_uid, exc)
+        with self.lock:
+            if new_uid in self.lib.mods and new_uid != mod.uid:
+                existing = self.lib.mods[new_uid]
+                sizes = {existing.file_path(v.main).stat().st_size for v in existing.vpks
+                         if existing.file_path(v.main).exists()}
+                mine = mod.file_path(mod.vpks[0].main)
+                if mine.exists() and mine.stat().st_size in sizes:
+                    # Same file already in the library under its real name: drop the duplicate.
+                    log.info("%s is a duplicate of %s, removing it", mod.uid, new_uid)
+                    self.lib.remove(mod.uid)
+                    shutil.rmtree(mod.folder, ignore_errors=True)
+                    for prof in self.lib.profiles.values():
+                        prof.entries = [(u, e) for u, e in prof.entries if u != mod.uid]
+                else:
+                    mod.note = f"Looks like a variant of “{name}”, which you already have installed."
+                self.lib.save()
+                self._dirty = True
+                return
+            old_uid, old_folder = mod.uid, mod.folder
+            self.lib.remove(old_uid)
+            mod.uid = new_uid
+            mod.source, mod.model, mod.gb_id = "gamebanana", match.model, match.gb_id
+            mod.name = name or mod.name
+            mod.author, mod.category, mod.thumb_url = author, category, thumb
+            mod.url = url or f"https://gamebanana.com/{match.model.lower()}s/{match.gb_id}"
+            mod.file_id, mod.file_name, mod.file_date = match.file_id or 0, file_name, file_date
+            mod.note = "" if match.file_id else "Identified, but the exact version is unknown; update it to be sure."
+            if old_folder.exists():
+                shutil.rmtree(mod.folder, ignore_errors=True)
+                old_folder.rename(mod.folder)
+            # keep its place in the load order
+            self.lib.mods[new_uid] = mod
+            self.lib.order.append(new_uid)
+            for prof in self.lib.profiles.values():
+                prof.entries = [(new_uid if u == old_uid else u, e) for u, e in prof.entries]
+            self.lib.save()
+            self._dirty = True   # library paths changed, so files get re-linked
+
+    # --------------------------------------------------------------- import
+    def detect_other_managers(self) -> dict[str, Path | None]:
+        return {"dmm": importers.find_dmm(), "grimoire": importers.find_grimoire()}
+
+    def plan_import(self, which: str) -> importers.ImportPlan:
+        if which == "dmm":
+            return importers.read_dmm()
+        gd = self.game_dir
+        if not gd:
+            raise NoGame()
+        return importers.read_grimoire(gd, exclude=set(self.lib.deployed))
+
+    def run_import(self, plan: importers.ImportPlan, choose: Chooser | None = None,
+                   progress: Progress | None = None, cancel: threading.Event | None = None) -> dict:
+        """Adopt a plan's mods and profiles. Returns counts for the summary."""
+        imported: dict[str, str] = {}   # plan key -> uid
+        downloaded = failed = 0
+        for i, m in enumerate(plan.mods):
+            if cancel is not None and cancel.is_set():
+                raise Cancelled()
+            if progress:
+                progress(f"Importing {m.name}", i, len(plan.mods))
+            try:
+                if m.vpks:
+                    uid = self._adopt_import(m)
+                elif m.can_download:
+                    file = GBFile(id=m.file_id, filename=m.file_name or f"{m.file_id}.zip",
+                                  download_url=f"https://gamebanana.com/dl/{m.file_id}")
+                    wanted = {w.lower() for w in m.wanted_names}
+
+                    def pick(sets, name, _w=wanted, _c=choose):
+                        if _w:
+                            hit = [s for s in sets if s.main.name.lower() in _w]
+                            if hit:
+                                return hit
+                        return _c(sets, name) if _c else sets
+
+                    mod = self.install_gamebanana(m.model, m.gb_id, file, choose=pick,
+                                                  progress=progress, cancel=cancel)
+                    mod.enabled = m.enabled
+                    uid = mod.uid
+                    downloaded += 1
+                else:
+                    continue
+            except Cancelled:
+                raise
+            except Exception as exc:  # noqa: BLE001 - keep going, report at the end
+                log.error("import of %s failed: %s", m.name, exc)
+                plan.warnings.append(f"“{m.name}”: {exc}")
+                failed += 1
+                continue
+            imported[m.key] = uid
+        with self.lock:
+            # Files that came straight out of the game's addons folders are now ours:
+            # record them so the next apply replaces them instead of adopting them again.
+            try:
+                citadel = self.citadel().resolve()
+            except NoGame:
+                citadel = None
+            for m in plan.mods:
+                if m.key not in imported or citadel is None:
+                    continue
+                for v in m.vpks:
+                    for f in (v.main, *v.chunks):
+                        try:
+                            rel = f.resolve().relative_to(citadel).as_posix()
+                        except ValueError:
+                            continue
+                        if rel.count("/") == 1 and rel.lower().startswith("addons"):
+                            self.lib.deployed[rel] = {"src": "", "size": -1}
+            # Imported mods take the plan's order, on top of anything already here.
+            ordered = [imported[m.key] for m in plan.mods if m.key in imported]
+            self.lib.set_order(ordered + [u for u in self.lib.order if u not in ordered])
+            for prof in plan.profiles:
+                entries = [(imported[k], on) for k, on in prof.entries if k in imported]
+                if not entries:
+                    continue
+                name = prof.name
+                if name in self.lib.profiles:
+                    name = f"{name} ({plan.source})"
+                self.lib.profiles[name] = Profile(name=name, entries=entries, saved_at=int(time.time()))
+            self.lib.save()
+            self._dirty = True
+        return {"imported": len(imported), "downloaded": downloaded, "failed": failed,
+                "profiles": sum(1 for p in plan.profiles if any(k in imported for k, _ in p.entries))}
+
+    def _adopt_import(self, m: importers.ImportMod) -> str:
+        sets = [VpkSet(main=v.main, chunks=list(v.chunks), rel=v.label) for v in m.vpks]
+        uid = m.uid
+        with self.lock:
+            existing = self.lib.mods.get(uid)
+            stored = self._store(uid, sets)
+            now = int(time.time())
+            mod = InstalledMod(
+                uid=uid, name=m.name, source="gamebanana" if m.gb_id else "local", model=m.model,
+                gb_id=m.gb_id, url=f"https://gamebanana.com/{m.model.lower()}s/{m.gb_id}" if m.gb_id else "",
+                author=m.author, category=m.category, thumb_url=m.thumb_url,
+                file_id=m.file_id, file_name=m.file_name, vpks=stored, enabled=m.enabled,
+                installed_at=existing.installed_at if existing else now, updated_at=now,
+            )
+            self.lib.add(mod, top=False)
+            self.lib.mods[uid] = mod
+            self.lib.save()
+        return uid
