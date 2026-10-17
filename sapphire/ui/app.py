@@ -555,16 +555,17 @@ class MainWindow(QMainWindow):
         run(worker, on_done=done, on_error=failed, on_progress=progress, pool=JOB_POOL)
         return job
 
-    def install_gb(self, model: str, gb_id: int, file=None):
+    def install_gb(self, model: str, gb_id: int, file=None, add: bool = False):
         existing = self.mgr.lib.by_gb(model, gb_id)
         label = existing.name if existing else f"GameBanana {model.lower()} {gb_id}"
         if file is not None:
             label = file.filename
 
-        def do(model, gb_id, file, choose=None, progress=None, cancel=None):
+        def do(model, gb_id, file, add, choose=None, progress=None, cancel=None):
             return self.mgr.install_gamebanana(model, gb_id, file, choose=choose,
-                                               progress=progress, cancel=cancel)
-        self._queue(label, do, model, gb_id, file, success="Installed {name}.")
+                                               progress=progress, cancel=cancel, add=add)
+        self._queue(label, do, model, gb_id, file, add,
+                    success="Installed {name}.")
 
     def update_mod(self, uid: str):
         mod = self.mgr.lib.mods.get(uid)

@@ -360,9 +360,9 @@ class CardGrid(QListView):
 # ---------------------------------------------------------------- detail pane
 
 class FileRow(QFrame):
-    install = Signal(object)
+    install = Signal(object, bool)   # file, add alongside (True) or replace the main entry (False)
 
-    def __init__(self, f: GBFile, state: str, primary: bool):
+    def __init__(self, f: GBFile, state: str, primary: bool, installed_name: str = ""):
         super().__init__()
         self.setObjectName("Panel")
         self.setStyleSheet(f"#Panel {{ background: {theme.RAISED}; border-radius: 6px; }}")
@@ -372,11 +372,20 @@ class FileRow(QFrame):
         top = QHBoxLayout()
         name = ElidedLabel(f.filename, bold=True)
         top.addWidget(name, 1)
+        if state in ("update", "older"):
+            # The mod is installed with a different file: this one can replace it or sit beside it.
+            add = QPushButton("Add")
+            add.setToolTip(f"Install this file as well, alongside “{installed_name}”. For optional "
+                           "add-on files (extra announcers, icons…) that go with the main download.")
+            add.clicked.connect(lambda: self.install.emit(f, True))
+            top.addWidget(add)
         btn = QPushButton({"current": "Reinstall", "update": "Update to this",
-                           "older": "Install this version"}.get(state, "Install"))
+                           "older": "Replace"}.get(state, "Install"))
+        if state == "older":
+            btn.setToolTip(f"Install this file instead of “{installed_name}”.")
         if primary and state != "current":
             btn.setProperty("kind", "primary")
-        btn.clicked.connect(lambda: self.install.emit(f))
+        btn.clicked.connect(lambda: self.install.emit(f, False))
         top.addWidget(btn)
         lay.addLayout(top)
         meta = f"{human_size(f.size)}   {fmt_date(f.date_added)}   {fmt_count(f.downloads)} downloads"
@@ -393,14 +402,14 @@ class FileRow(QFrame):
 
 
 class DetailPane(QScrollArea):
-    install_requested = Signal(str, int, object)  # model, id, GBFile
+    install_requested = Signal(str, int, object, bool)  # model, id, GBFile, add alongside
     author_clicked = Signal(int, str)
 
     def __init__(self, client, images, installed_lookup):
         super().__init__()
         self.client = client
         self.images = images
-        self.installed_lookup = installed_lookup  # (model, id) -> InstalledMod|None
+        self.installed_lookup = installed_lookup  # (model, id) -> [InstalledMod], main entry first
         self.setObjectName("DetailPanel")
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.NoFrame)
@@ -557,7 +566,9 @@ class DetailPane(QScrollArea):
             w.setObjectName("Muted")
             self.lay.addWidget(w)
         else:
-            installed = self.installed_lookup(sub.model, sub.id)
+            installed = self.installed_lookup(sub.model, sub.id)   # every entry of this mod
+            main = installed[0] if installed else None
+            have = {m.file_id for m in installed}
             files = self.details.files
             newest = newest_file(files)
             live = [f for f in files if not f.archived]
@@ -565,17 +576,24 @@ class DetailPane(QScrollArea):
                 none = QLabel("This mod has no downloadable files.")
                 none.setObjectName("Muted")
                 self.lay.addWidget(none)
+            elif len(live) > 1:
+                fh = QLabel("Several files: usually one main download plus optional add-ons, or one file "
+                            "per colour. Install replaces what you have; Add keeps it and installs this too.")
+                fh.setObjectName("Muted")
+                fh.setWordWrap(True)
+                self.lay.addWidget(fh)
             for f in live + [f for f in files if f.archived][:3]:
-                if installed and installed.file_id == f.id:
+                if f.id in have:
                     state = "current"
-                elif installed and newest and f.id == newest.id:
+                elif main and newest and f.id == newest.id:
                     state = "update"
-                elif installed:
+                elif main:
                     state = "older"
                 else:
                     state = "new"
-                row = FileRow(f, state, primary=(newest is not None and f.id == newest.id))
-                row.install.connect(lambda file, s=sub: self.install_requested.emit(s.model, s.id, file))
+                row = FileRow(f, state, primary=(newest is not None and f.id == newest.id),
+                              installed_name=main.file_name if main else "")
+                row.install.connect(lambda file, add, s=sub: self.install_requested.emit(s.model, s.id, file, add))
                 self.lay.addWidget(row)
             if self.details.text_html:
                 dhead = QLabel("Description")
@@ -749,7 +767,7 @@ class FilterPanel(QWidget):
 # ---------------------------------------------------------------- page
 
 class BrowsePage(QWidget):
-    install_requested = Signal(str, int, object)  # model, id, GBFile|None
+    install_requested = Signal(str, int, object, bool)  # model, id, GBFile|None, add alongside
     status = Signal(str)
 
     def __init__(self, manager, images):
@@ -827,7 +845,7 @@ class BrowsePage(QWidget):
         cl.addWidget(self.message, 1)
         root.addWidget(center, 1)
 
-        self.detail = DetailPane(self.client, images, lambda m, i: self.mgr.lib.by_gb(m, i))
+        self.detail = DetailPane(self.client, images, lambda m, i: self.mgr.lib.by_gb_all(m, i))
         self.detail.install_requested.connect(self.install_requested)
         self.detail.author_clicked.connect(self.filter_author)
         root.addWidget(self.detail)
@@ -993,4 +1011,4 @@ class BrowsePage(QWidget):
             self.status.emit("That doesn't look like a GameBanana mod link.")
             return
         model, mid = parsed
-        self.install_requested.emit(model, mid, None)
+        self.install_requested.emit(model, mid, None, False)

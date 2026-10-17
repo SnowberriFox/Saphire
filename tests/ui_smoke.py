@@ -286,7 +286,13 @@ def main():
 
     def settings():
         win.go(4)
-        QTimer.singleShot(400, lambda: (shot("5-settings"), listview()))
+        QTimer.singleShot(400, lambda: (shot("5-settings"), small_settings()))
+
+    def small_settings():
+        # a short window must scroll, not squash the sections together
+        win.resize(1020, 640)
+        app.processEvents()
+        QTimer.singleShot(400, lambda: (shot("5b-settings-small"), win.resize(1360, 860), listview()))
 
     def listview():
         win.go(0)

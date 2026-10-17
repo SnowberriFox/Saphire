@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QFileDialog, QFrame, QGridLayout,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
-                               QVBoxLayout, QWidget)
+                               QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from sapphire import __version__, paths, steam
 from sapphire.ui import theme
@@ -164,7 +164,19 @@ class SettingsPage(QWidget):
     def __init__(self, manager):
         super().__init__()
         self.mgr = manager
-        root = QVBoxLayout(self)
+        # Everything lives in a scroll area so a short window scrolls instead of squashing
+        # the sections into each other.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body = QWidget()
+        body.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        scroll.setWidget(body)
+        outer.addWidget(scroll)
+        root = QVBoxLayout(body)
         root.setContentsMargins(24, 18, 24, 18)
         root.setSpacing(10)
         title = QLabel("Settings")
@@ -195,6 +207,7 @@ class SettingsPage(QWidget):
         root.addWidget(self.auto_apply)
         auto_hint = QLabel("When off, use “Apply changes” (or Launch) to push your changes into the game.")
         auto_hint.setObjectName("Muted")
+        auto_hint.setWordWrap(True)
         root.addWidget(auto_hint)
 
         root.addWidget(_section("Appearance"))
@@ -286,9 +299,12 @@ class SettingsPage(QWidget):
         g.addWidget(fix)
         g.addWidget(addons)
         g.addStretch(1)
-        g.addWidget(reset)
-        g.addWidget(clear)
         root.addLayout(g)
+        g2 = QHBoxLayout()
+        g2.addWidget(reset)
+        g2.addWidget(clear)
+        g2.addStretch(1)
+        root.addLayout(g2)
 
         root.addWidget(_section("Switching from another mod manager"))
         imp = QHBoxLayout()

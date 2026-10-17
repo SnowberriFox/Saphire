@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Callable
 
 from sapphire import archive, conflicts, deploy, gameinfo, identify, importers, paths, steam
-from sapphire.gamebanana import Cancelled, GameBananaClient, GameBananaError, GBFile, newest_file
+from sapphire.gamebanana import (Cancelled, GameBananaClient, GameBananaError, GBFile, newer_version,
+                                 newest_file)
 from sapphire.library import InstalledMod, Library, Profile, StoredFile, StoredVpk, UpdateInfo
 from sapphire.vpk import VpkSet, chunk_index, find_sets
 
@@ -41,6 +42,12 @@ class NoGame(ManagerError):
 
 def _safe_name(name: str) -> str:
     return re.sub(r"[^\w.\-]+", "_", name).strip("._") or "file"
+
+
+def _pretty_file(filename: str) -> str:
+    """'optional_announcer_zmpixie.zip' -> 'optional announcer zmpixie'."""
+    stem = re.sub(r"\.(zip|7z|rar|vpk)$", "", filename, flags=re.I)
+    return re.sub(r"[_\-]+", " ", stem).strip() or filename
 
 
 class Manager:
@@ -137,14 +144,27 @@ class Manager:
     # ------------------------------------------------------------------ install
     def install_gamebanana(self, model: str, gb_id: int, file: GBFile | None = None,
                            choose: Chooser | None = None, progress: Progress | None = None,
-                           cancel: threading.Event | None = None) -> InstalledMod:
+                           cancel: threading.Event | None = None, add: bool = False,
+                           into: str | None = None) -> InstalledMod:
+        """Install one of a mod's files. By default it replaces the mod's main entry;
+        `add=True` keeps what's there and installs the file as an extra entry beside it
+        (for optional add-on files); `into` reinstalls a specific existing entry."""
         details = self.gb.details(model, gb_id)
         sub = details.submission
         if file is None:
             file = newest_file(details.files)
         if file is None:
             raise ManagerError(f"“{sub.name}” has no downloadable files.")
-        uid = sub.key
+        same = self.lib.by_gb_file(model, gb_id, file.id)
+        if into:
+            uid = into
+        elif same is not None:
+            uid = same.uid            # this exact file is already installed: refresh it in place
+        elif add and self.lib.mods.get(sub.key) is not None:
+            uid = f"{sub.key}-f{file.id}"
+        else:
+            uid = sub.key
+        extra = uid != sub.key
         existing = self.lib.mods.get(uid)
         work = Path(tempfile.mkdtemp(prefix="install-", dir=paths.cache_dir()))
         try:
@@ -161,8 +181,14 @@ class Manager:
             with self.lock:
                 stored = self._store(uid, sets, chosen)
                 now = int(time.time())
+                if existing and existing.name:
+                    name = existing.name
+                elif extra:
+                    name = f"{sub.name} + {_pretty_file(file.filename)}"
+                else:
+                    name = sub.name
                 mod = InstalledMod(
-                    uid=uid, name=sub.name, source="gamebanana", model=model, gb_id=gb_id,
+                    uid=uid, name=name, source="gamebanana", model=model, gb_id=gb_id,
                     url=sub.url or f"https://gamebanana.com/{model.lower()}s/{gb_id}",
                     author=sub.author, category=sub.category_label, thumb_url=sub.thumb_url,
                     nsfw=sub.nsfw, file_id=file.id, file_name=file.filename,
@@ -333,7 +359,7 @@ class Manager:
         if target is None and file_id:
             raise ManagerError("That file isn't on GameBanana anymore. Pick another one.")
         target = target or newest_file(files)
-        return self.install_gamebanana(mod.model, mod.gb_id, target, choose, progress, cancel)
+        return self.install_gamebanana(mod.model, mod.gb_id, target, choose, progress, cancel, into=uid)
 
     def set_order(self, uids: list[str]) -> None:
         with self.lock:
@@ -439,7 +465,7 @@ class Manager:
 
         def check(mod: InstalledMod):
             files = self.gb.files(mod.model, mod.gb_id)
-            return mod, newest_file(files), files
+            return mod, files
 
         with ThreadPoolExecutor(max_workers=6) as pool:
             futures = [pool.submit(check, m) for m in mods]
@@ -448,13 +474,14 @@ class Manager:
                 if progress:
                     progress(done, len(mods))
                 try:
-                    mod, latest, files = fut.result()
+                    mod, files = fut.result()
                 except GameBananaError as exc:
                     log.warning("update check failed: %s", exc)
                     continue
                 with self.lock:
-                    if latest and mod.file_id and latest.id != mod.file_id and latest.date_added >= mod.file_date:
-                        mod.update = UpdateInfo(latest.id, latest.filename, latest.date_added)
+                    newer = newer_version(mod.file_id, mod.file_name, mod.file_date, files) if mod.file_id else None
+                    if newer:
+                        mod.update = UpdateInfo(newer.id, newer.filename, newer.date_added)
                         found.append(mod)
                     else:
                         mod.update = None
@@ -472,7 +499,7 @@ class Manager:
         target = target or newest_file(files)
         if target is None:
             raise ManagerError("No files available for this mod anymore.")
-        new = self.install_gamebanana(mod.model, mod.gb_id, target, choose, progress, cancel)
+        new = self.install_gamebanana(mod.model, mod.gb_id, target, choose, progress, cancel, into=uid)
         new.update = None
         with self.lock:
             self.lib.save()
@@ -647,8 +674,10 @@ class Manager:
                                 return hit
                         return _c(sets, name) if _c else sets
 
+                    # add=True: a second file of the same mod (an optional add-on the other
+                    # manager had installed too) sits beside the first instead of replacing it.
                     mod = self.install_gamebanana(m.model, m.gb_id, file, choose=pick,
-                                                  progress=progress, cancel=cancel)
+                                                  progress=progress, cancel=cancel, add=True)
                     mod.enabled = m.enabled
                     uid = mod.uid
                     downloaded += 1
@@ -716,6 +745,12 @@ class Manager:
         uid = m.uid
         with self.lock:
             existing = self.lib.mods.get(uid)
+            if (m.gb_id and m.file_id and existing is not None and existing.file_id
+                    and existing.file_id != m.file_id):
+                # Another file of a mod that's already here (an optional add-on): keep both.
+                same = self.lib.by_gb_file(m.model, m.gb_id, m.file_id)
+                uid = same.uid if same else f"{uid}-f{m.file_id}"
+                existing = self.lib.mods.get(uid)
             stored = self._store(uid, sets)
             now = int(time.time())
             mod = InstalledMod(

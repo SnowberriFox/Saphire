@@ -208,6 +208,40 @@ def parse_url(text: str) -> tuple[str, int] | None:
     return ("Sound" if m.group(1).lower() == "sounds" else "Mod"), int(m.group(2))
 
 
+_NOISE = {"v", "ver", "version", "final", "fix", "fixed", "hotfix", "update", "updated", "upd", "new",
+          "old", "latest", "patch", "patched", "release", "rel", "build", "beta", "alpha", "rc", "x",
+          "jan", "january", "feb", "february", "mar", "march", "apr", "april", "may", "jun", "june", "jul",
+          "july", "aug", "august", "sep", "sept", "september", "oct", "october", "nov", "november", "dec",
+          "december", "mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+
+
+def file_family(filename: str) -> str:
+    """What's left of a file name once version numbers, dates and words like 'final' are
+    stripped: 'qollock_405_16october.zip' and 'qollock_406.zip' share a family, an
+    'optional_announcer_pixie.zip' add-on does not. Used to tell a new version of the
+    installed file from a different file of the same mod."""
+    stem = re.sub(r"\.(zip|7z|rar|vpk|tar|gz)$", "", filename.strip().lower())
+    stem = re.sub(r"\d+", " ", stem)
+    tokens = [t for t in re.split(r"[^a-z]+", stem) if t and t not in _NOISE]
+    return "".join(tokens)
+
+
+def newer_version(mine_id: int, mine_name: str, mine_date: int, files: list[GBFile]) -> GBFile | None:
+    """The file to update to, or None. A newer live file of the same family counts; if
+    the installed file was archived or removed, the newest live file of the same family,
+    else the newest live file at all. Other files of the mod (optional add-ons, other
+    colours) are never offered as updates."""
+    mine = next((f for f in files if f.id == mine_id), None)
+    live = [f for f in files if not f.archived and f.id != mine_id]
+    fam = file_family(mine.filename if mine else mine_name)
+    kin = [f for f in live if file_family(f.filename) == fam]
+    if mine is not None and not mine.archived:
+        kin = [f for f in kin if f.date_added > mine.date_added or (f.date_added == mine.date_added and f.id > mine.id)]
+        return max(kin, key=lambda f: (f.date_added, f.id), default=None)
+    pool = kin or live
+    return max(pool, key=lambda f: (f.date_added, f.id), default=None)
+
+
 def newest_file(files: list[GBFile]) -> GBFile | None:
     live = [f for f in files if not f.archived]
     pool = live or files

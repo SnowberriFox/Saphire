@@ -190,7 +190,21 @@ class Library:
         return [m for m in self.ordered() if m.enabled]
 
     def by_gb(self, model: str, gb_id: int) -> InstalledMod | None:
-        return self.mods.get(f"gb-{model}-{gb_id}")
+        """The main entry for a GameBanana mod, or any extra file of it if the main one is gone."""
+        main = self.mods.get(f"gb-{model}-{gb_id}")
+        if main is not None:
+            return main
+        return next(iter(self.by_gb_all(model, gb_id)), None)
+
+    def by_gb_all(self, model: str, gb_id: int) -> list[InstalledMod]:
+        """Every entry of a GameBanana mod: its main file plus any extra files added alongside."""
+        key = f"gb-{model}-{gb_id}"
+        found = [m for m in self.ordered()
+                 if m.source == "gamebanana" and m.model == model and m.gb_id == gb_id]
+        return sorted(found, key=lambda m: m.uid != key)  # main entry first, then load order
+
+    def by_gb_file(self, model: str, gb_id: int, file_id: int) -> InstalledMod | None:
+        return next((m for m in self.by_gb_all(model, gb_id) if m.file_id == file_id), None)
 
     def add(self, mod: InstalledMod, top: bool = True) -> None:
         self.mods[mod.uid] = mod

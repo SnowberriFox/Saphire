@@ -314,6 +314,46 @@ def test_other_variants_are_separate_files(setup, tmp_path):
         mgr.variant_files(local.uid)
 
 
+def test_add_optional_files_alongside_main(setup, tmp_path):
+    """A main download plus optional add-on files can all be installed at once."""
+    mgr, game, zips, _ = setup
+    main = GBFile(id=51, filename="qollock_405.zip", date_added=300)
+    ann = GBFile(id=52, filename="optional_announcer_pixie.zip", date_added=200)
+    icons = GBFile(id=53, filename="optional_addon_icons.zip", date_added=100)
+    zips[5] = [(main, mod_zip(tmp_path, "qmain", {"": {"ui/hud.txt": b"main"}})),
+               (ann, mod_zip(tmp_path, "qann", {"": {"sounds/ann.vsnd_c": b"pix"}})),
+               (icons, mod_zip(tmp_path, "qicons", {"": {"ui/icons.png": b"ic"}}))]
+    m = mgr.install_gamebanana("Mod", 5, main)
+    a = mgr.install_gamebanana("Mod", 5, ann, add=True)
+    i = mgr.install_gamebanana("Mod", 5, icons, add=True)
+    assert m.uid == "gb-Mod-5" and a.uid == "gb-Mod-5-f52" and i.uid == "gb-Mod-5-f53"
+    assert a.name == "Mod 5 + optional announcer pixie"
+    assert [x.uid for x in mgr.lib.by_gb_all("Mod", 5)] == ["gb-Mod-5", "gb-Mod-5-f53", "gb-Mod-5-f52"]
+    assert mgr.lib.by_gb("Mod", 5).uid == "gb-Mod-5"
+    mgr.apply()
+    assert len(addons(game)) == 3
+    # "add" of a file that's already installed refreshes that entry instead of duplicating it
+    again = mgr.install_gamebanana("Mod", 5, ann, add=True)
+    assert again.uid == "gb-Mod-5-f52" and len(mgr.lib.by_gb_all("Mod", 5)) == 3
+    # without add=, a different file replaces the main entry and leaves the extras alone
+    mgr.install_gamebanana("Mod", 5, GBFile(id=51, filename="qollock_405.zip", date_added=300))
+    assert len(mgr.lib.by_gb_all("Mod", 5)) == 3
+    # update check: the newest file is the main one, so the add-ons are NOT flagged
+    assert mgr.check_updates() == []
+    # the author replaces the announcer file: only that extra is flagged, and updates in place
+    ann2 = GBFile(id=54, filename="optional_announcer_pixie_v2.zip", date_added=400)
+    zips[5][1] = (GBFile(id=52, filename="optional_announcer_pixie.zip", date_added=200, archived=True), zips[5][1][1])
+    zips[5].append((ann2, mod_zip(tmp_path, "qann2", {"": {"sounds/ann.vsnd_c": b"pix2"}})))
+    found = mgr.check_updates()
+    assert [x.uid for x in found] == ["gb-Mod-5-f52"]
+    assert mgr.lib.mods["gb-Mod-5"].update is None  # a renamed add-on is not an update for the main file
+    upd = mgr.update("gb-Mod-5-f52")
+    assert upd.uid == "gb-Mod-5-f52" and upd.file_id == 54 and upd.name == "Mod 5 + optional announcer pixie"
+    # removing the main entry leaves the extras, and by_gb still finds the mod
+    mgr.remove("gb-Mod-5")
+    assert mgr.lib.by_gb("Mod", 5).uid == "gb-Mod-5-f53"
+
+
 def test_overflow_into_addons2(setup, tmp_path):
     mgr, game, _, _ = setup
     src = tmp_path / "many"
@@ -436,3 +476,28 @@ def test_clear_all_data(setup):
     from sapphire import paths
     assert list(paths.library_dir().iterdir()) == []
     mgr.lib.game_dir == str(game)
+
+
+def test_newer_version_rule():
+    from sapphire.gamebanana import file_family, newer_version
+    assert file_family("qollock_405_16october.zip") == file_family("QOLLock_406.zip") == "qollock"
+    assert file_family("yamato_blue_cd01a.rar") != file_family("yamato_red_cd01a.rar")
+    main = GBFile(id=1, filename="qollock_405.zip", date_added=300)
+    addon = GBFile(id=2, filename="optional_announcer.zip", date_added=500)
+    files = [main, addon]
+    # a newer add-on is not an update for the main file, and vice versa
+    assert newer_version(1, main.filename, 300, files) is None
+    assert newer_version(2, addon.filename, 500, files) is None
+    # a newer file of the same family is
+    v2 = GBFile(id=3, filename="qollock_406.zip", date_added=600)
+    assert newer_version(1, main.filename, 300, files + [v2]) is v2
+    # my file archived with a same-family successor -> that; archived with none -> newest live
+    gone = [GBFile(id=1, filename="qollock_405.zip", date_added=300, archived=True), addon, v2]
+    assert newer_version(1, "qollock_405.zip", 300, gone) is v2
+    assert newer_version(1, "qollock_405.zip", 300, [gone[0], addon]) is addon
+    # my file removed entirely, renamed successor -> newest live file
+    assert newer_version(9, "something_old.zip", 100, [addon]) is addon
+    # another colour of a variant mod is never an update
+    blue = GBFile(id=5, filename="yamato_blue.rar", date_added=100)
+    red = GBFile(id=6, filename="yamato_red.rar", date_added=200)
+    assert newer_version(5, blue.filename, 100, [blue, red]) is None

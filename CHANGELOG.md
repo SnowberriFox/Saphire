@@ -3,6 +3,25 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.4.3 — 2026-10-18
+
+### Added
+- **Install a mod's optional files alongside the main one.** Mods like QOL Lock
+  ship a main download plus optional add-ons (extra announcers, icon packs…).
+  In Browse, each file of a mod you already have now shows **Add** next to
+  **Replace**: Add installs it as its own entry beside the main one (named
+  "Mod + file"), with its own on/off, load-order slot and update checks. The
+  import from DMM/Grimoire keeps such extras too instead of overwriting.
+
+### Fixed
+- **Settings page squashed in a short window.** The sections overlapped and
+  text was clipped when the window was small or windowed. Settings now scrolls.
+- **Update checks for mods with several files.** A mod's other files (optional
+  add-ons, other colours) were offered as "updates" to the file you had. An
+  update is now only a newer file that replaces yours: same file name family
+  (version numbers and dates ignored), or anything live once your file is
+  archived or removed.
+
 ## 1.4.2 — 2026-10-18
 
 ### Fixed
