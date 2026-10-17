@@ -9,10 +9,10 @@ Deadlock whether Steam is native, Flatpak or Snap, on any library drive.
 
 ## Install
 
-You need the folder this README is in. Open a terminal in it and run:
-
 ```sh
-./install.sh
+git clone https://github.com/SnowberriFox/Saphire.git
+cd Saphire
+bash install.sh
 ```
 
 That's it. Sapphire appears in your app menu. The installer:
@@ -23,8 +23,22 @@ That's it. Sapphire appears in your app menu. The installer:
   doesn't care what Python your system has
 - bundles 7-Zip so `.rar` and `.7z` mods work out of the box
 
-Run `./install.sh` again any time to update Sapphire. Your mods, profiles and
-settings are kept.
+## Updating
+
+Sapphire updates itself. It checks GitHub on start and every few hours; when a
+newer version exists, a bar appears at the top with an **Update** button. The
+update is downloaded and installed into Sapphire's own folder, then you restart
+it. Mods, profiles and settings are untouched. Settings → Check for updates does
+the same on demand.
+
+It looks for the latest GitHub release first, and if there are no releases, for
+the version number on the `main` branch. So to ship an update: bump
+`__version__` in `sapphire/__init__.py` (and `version` in `pyproject.toml`),
+push to `main`, and every install picks it up. Tagging a release (`v1.3.0`) on
+GitHub works too and lets you attach notes.
+
+If you're running from a git clone with `python -m sapphire`, the updater steps
+aside and you use `git pull` instead.
 
 To uninstall: `./uninstall.sh` (keeps your mod library) or `./uninstall.sh --purge`.
 
@@ -122,6 +136,7 @@ Code map:
 | `sapphire/identify.py` | Fingerprints a VPK and asks the hash index which mod it is |
 | `sapphire/importers.py` | Reads Deadlock Mod Manager and Grimoire data into an import plan |
 | `sapphire/core.py` | The manager: install, update, apply, profiles, import, identify |
+| `sapphire/updater.py` | Checks GitHub for a newer Sapphire and installs it in place |
 | `sapphire/ui/` | The Qt interface (`onboarding.py` is the first-run wizard) |
 
 Data lives in `~/.local/share/sapphire` (`SAPPHIRE_HOME` overrides it, handy for

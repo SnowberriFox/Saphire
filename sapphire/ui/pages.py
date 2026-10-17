@@ -154,6 +154,7 @@ class SettingsPage(QWidget):
     fix_gameinfo = Signal()
     setup_requested = Signal()
     import_requested = Signal(str)
+    app_update_requested = Signal()
 
     def __init__(self, manager):
         super().__init__()
@@ -223,6 +224,19 @@ class SettingsPage(QWidget):
         root.addWidget(self.import_hint)
 
         root.addWidget(_section("Sapphire"))
+        u = QHBoxLayout()
+        self.version_label = QLabel(f"Version {__version__}")
+        self.app_update_btn = QPushButton("Check for updates")
+        self.app_update_btn.clicked.connect(self.app_update_requested)
+        u.addWidget(self.version_label)
+        u.addWidget(self.app_update_btn)
+        u.addStretch(1)
+        root.addLayout(u)
+        self.update_hint = QLabel()
+        self.update_hint.setObjectName("Muted")
+        self.update_hint.setWordWrap(True)
+        root.addWidget(self.update_hint)
+        self.set_update_state(None)
         d = QHBoxLayout()
         setup = QPushButton("Run setup again")
         setup.clicked.connect(self.setup_requested)
@@ -242,6 +256,19 @@ class SettingsPage(QWidget):
         root.addWidget(info)
         root.addStretch(1)
         self.refresh()
+
+    def set_update_state(self, rel, installed=None):
+        from sapphire.updater import REPO, running_from_source
+        if installed:
+            self.update_hint.setText(f"Version {installed.version} is installed and will be used after a restart.")
+        elif running_from_source():
+            self.update_hint.setText("Running from a source checkout, so updates come from git pull. "
+                                     f"Source: github.com/{REPO}")
+        elif rel:
+            self.update_hint.setText(f"Version {rel.version} is available. Use the bar at the top to install it.")
+        else:
+            self.update_hint.setText(f"Updates are checked on start and every few hours from github.com/{REPO}. "
+                                     "Installing one only touches Sapphire's own folder; mods and settings stay.")
 
     def refresh(self):
         gd = self.mgr.game_dir

@@ -10,7 +10,8 @@ import threading
 from pathlib import Path
 
 from PySide6.QtCore import QFileSystemWatcher, Qt, QTimer
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QDesktopServices, QIcon
+from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QDialog, QFileDialog, QHBoxLayout, QLabel,
                                QMainWindow, QProgressBar, QPushButton, QStackedWidget, QStatusBar,
                                QVBoxLayout, QWidget)
@@ -26,6 +27,7 @@ from sapphire.ui.importing import ImportDialog
 from sapphire.ui.installed import InstalledPage
 from sapphire.ui.onboarding import OnboardingDialog
 from sapphire.ui.pages import ProfilesPage, SettingsPage
+from sapphire.updater import Updater, UpdateError, restart, running_from_source
 from sapphire.ui.workers import JOB_POOL, NET_POOL, MainThreadCaller, run
 
 log = logging.getLogger("sapphire")
@@ -48,6 +50,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
         self.caller = MainThreadCaller()
         self.images = ImageCache(manager.gb.session)
+        self.updater = Updater(manager.gb.session)
         self.jobs: list[Job] = []
         self.running = False
         self._applying = False
@@ -70,6 +73,32 @@ class MainWindow(QMainWindow):
         self.banner_wrap = banner_wrap
         banner_wrap.hide()
         outer.addWidget(banner_wrap)
+
+        self.update_bar = QWidget()
+        self.update_bar.setObjectName("UpdateBar")
+        ub = QHBoxLayout(self.update_bar)
+        ub.setContentsMargins(16, 8, 16, 0)
+        self.update_frame = QWidget()
+        self.update_frame.setObjectName("Banner")
+        uf = QHBoxLayout(self.update_frame)
+        uf.setContentsMargins(12, 6, 8, 6)
+        self.update_label = QLabel()
+        self.update_label.setStyleSheet("background: transparent;")
+        self.update_notes = QPushButton("What's new")
+        self.update_notes.setFlat(True)
+        self.update_notes.setStyleSheet("QPushButton { background: transparent; border: none; text-decoration: underline; padding: 2px 6px; }")
+        self.update_go = QPushButton("Update now")
+        self.update_go.setProperty("kind", "primary")
+        self.update_go.clicked.connect(self.install_app_update)
+        self.update_later = QPushButton("Later")
+        self.update_later.clicked.connect(self.update_bar.hide)
+        uf.addWidget(self.update_label, 1)
+        uf.addWidget(self.update_notes)
+        uf.addWidget(self.update_go)
+        uf.addWidget(self.update_later)
+        ub.addWidget(self.update_frame)
+        self.update_bar.hide()
+        outer.addWidget(self.update_bar)
 
         self.stack = QStackedWidget()
         self.browse = BrowsePage(manager, self.images)
@@ -99,6 +128,7 @@ class MainWindow(QMainWindow):
         self.settings.reset_requested.connect(self.reset_vanilla)
         self.settings.setup_requested.connect(self.run_setup)
         self.settings.import_requested.connect(self.import_from)
+        self.settings.app_update_requested.connect(lambda: self.check_app_update(manual=True))
 
         self._apply_timer = QTimer(self, singleShot=True, interval=600)
         self._apply_timer.timeout.connect(self.apply_now)
@@ -287,6 +317,10 @@ class MainWindow(QMainWindow):
             self.apply_now(quiet=True)
         if any(m.source == "gamebanana" for m in self.mgr.lib.mods.values()):
             QTimer.singleShot(1500, self.check_updates)
+        QTimer.singleShot(4000, self.check_app_update)
+        self._app_update_timer = QTimer(self, interval=6 * 3600 * 1000)
+        self._app_update_timer.timeout.connect(self.check_app_update)
+        self._app_update_timer.start()
 
     def _game_dir_changed(self):
         self._watch_gameinfo()
@@ -556,6 +590,100 @@ class MainWindow(QMainWindow):
             error(self, "Couldn't identify mods", str(exc))
 
         run(self.mgr.identify, uids, on_done=done, on_error=failed)
+
+    # ------------------------------------------------------------ app updates
+    def check_app_update(self, manual: bool = False):
+        if self.updater.installed:
+            self._show_restart()
+            return
+        if manual:
+            self.settings.app_update_btn.setEnabled(False)
+            self.settings.app_update_btn.setText("Checking…")
+
+        def done(rel):
+            self.settings.app_update_btn.setEnabled(True)
+            self.settings.app_update_btn.setText("Check for updates")
+            self.settings.set_update_state(rel)
+            if rel:
+                what = "" if rel.source == "release" else " (latest from the main branch)"
+                self.update_label.setText(f"Sapphire {rel.version} is available{what}. You have {__version__}.")
+                self.update_notes.setVisible(bool(rel.url))
+                try:
+                    self.update_notes.clicked.disconnect()
+                except RuntimeError:
+                    pass
+                self.update_notes.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(rel.url)))
+                self.update_go.setText(f"Update to {rel.version}")
+                self.update_go.setEnabled(True)
+                self.update_later.show()
+                self.update_bar.show()
+            elif manual:
+                self.say(f"Sapphire {__version__} is the latest version.")
+
+        def failed(exc):
+            self.settings.app_update_btn.setEnabled(True)
+            self.settings.app_update_btn.setText("Check for updates")
+            log.warning("app update check failed: %s", exc)
+            if manual:
+                error(self, "Couldn't check for updates", str(exc))
+
+        run(self.updater.check, manual, on_done=done, on_error=failed)
+
+    def install_app_update(self):
+        rel = self.updater.available
+        if not rel:
+            return
+        if running_from_source():
+            error(self, "Running from source", "You're running Sapphire from a source checkout, so update it "
+                  "with git pull instead.")
+            return
+        self.update_go.setEnabled(False)
+        self.update_later.hide()
+        job = Job(f"Sapphire {rel.version}")
+        self._job_started(job)
+
+        def progress(stage, done, total):
+            self.update_label.setText(f"{stage} Sapphire {rel.version}…")
+            if self.jobs and self.jobs[0] is job:
+                self._jobs_ui(done, total, stage)
+
+        def done(_):
+            self._job_finished(job)
+            self._show_restart()
+
+        def failed(exc):
+            self._job_finished(job)
+            self.update_go.setEnabled(True)
+            self.update_later.show()
+            self.update_label.setText(f"Update to {rel.version} failed.")
+            error(self, "Update failed", str(exc))
+
+        run(self.updater.install, rel, on_done=done, on_error=failed, on_progress=progress, pool=JOB_POOL)
+
+    def _show_restart(self):
+        rel = self.updater.installed
+        if not rel:
+            return
+        self.update_label.setText(f"Sapphire {rel.version} is installed. Restart to start using it.")
+        self.update_notes.hide()
+        self.update_go.setText("Restart now")
+        self.update_go.setEnabled(True)
+        try:
+            self.update_go.clicked.disconnect()
+        except RuntimeError:
+            pass
+        self.update_go.clicked.connect(self._restart)
+        self.update_later.show()
+        self.update_bar.show()
+        self.settings.set_update_state(None, installed=rel)
+
+    def _restart(self):
+        if self.jobs and not confirm(self, "Restart Sapphire", "Downloads are still running. Restart anyway?", "Restart"):
+            return
+        self._cancel_jobs()
+        self.mgr.lib.save()
+        log.info("restarting after update")
+        restart()
 
     def check_updates(self, manual: bool = False):
         if manual:
