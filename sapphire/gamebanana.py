@@ -29,6 +29,7 @@ MODELS = ("Mod", "Sound")
 SORTS = {
     "popular": ("Most liked", "Generic_MostLiked"),
     "views": ("Most viewed", "Generic_MostViewed"),
+    "downloads": ("Most downloaded", "Generic_MostDownloaded"),
     "newest": ("Newest", "Generic_Newest"),
     "updated": ("Recently updated", "Generic_LatestModified"),
 }

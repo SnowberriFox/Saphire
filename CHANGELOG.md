@@ -3,6 +3,25 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.4.0 — 2026-10-18
+
+### Added
+- **Downloads page.** Every install, update and import this session with live
+  progress, cancel per item or all, retry for failures, and a count in the nav.
+- **Grid view for Installed**, now the default (List is still there). Cards show
+  the load-order number, an on/off box, update and conflict badges, and you
+  drag them to reorder just like the list.
+- **Sort by most downloaded** in Browse.
+- **Discord Rich Presence**, off by default. Settings → Discord; needs a Discord
+  Application ID (free, two minutes at discord.com/developers). Talks only to
+  the Discord app on this computer.
+
+### Fixed
+- A long file name (no spaces, so it couldn't wrap) pushed the Install button
+  off the edge of the details panel. File names are now shortened in the
+  middle with the full name on hover, and the panel can't be widened by its
+  contents any more.
+
 ## 1.3.1 — 2026-10-17
 
 ### Fixed

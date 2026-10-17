@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, QUrl, Signal
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QPainter, QPainterPath, QPen, QPolygonF
-from PySide6.QtWidgets import (QAbstractItemView, QFrame, QHBoxLayout, QLabel, QLineEdit,
-                               QListWidget, QListWidgetItem, QMenu, QPushButton, QScrollArea,
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QFrame, QHBoxLayout, QLabel, QLineEdit,
+                               QListWidget, QListWidgetItem, QMenu, QPushButton, QScrollArea, QSizePolicy,
                                QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget,
                                QTreeWidgetItem, QVBoxLayout, QWidget)
 
@@ -22,15 +22,34 @@ class RowDelegate(QStyledItemDelegate):
     def __init__(self, page):
         super().__init__(page.list)
         self.page = page
+        self.mode = "list"
+        self.card = QSize(theme.px(200), theme.px(196))
 
     def sizeHint(self, option, index):
+        if self.mode == "grid":
+            return self.card
         return QSize(option.rect.width(), theme.px(66))
+
+    def _toggle_rect(self, rect) -> QRectF:
+        r = QRectF(rect).adjusted(6, 6, -6, -6)
+        return QRectF(r.right() - theme.px(30), r.top() + theme.px(8), theme.px(22), theme.px(22))
+
+    def editorEvent(self, event, model, option, index):
+        if self.mode == "grid" and event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+            if self._toggle_rect(option.rect).contains(QPointF(event.position())):
+                state = index.data(Qt.CheckStateRole)
+                new = Qt.Unchecked if state in (Qt.Checked, Qt.Checked.value) else Qt.Checked
+                model.setData(index, new, Qt.CheckStateRole)
+                return True
+        return super().editorEvent(event, model, option, index)
 
     def paint(self, p: QPainter, option, index):
         uid = index.data(ROLE_UID)
         mod: InstalledMod | None = self.page.mgr.lib.mods.get(uid)
         if mod is None:
             return
+        if self.mode == "grid":
+            return self._paint_card(p, option, mod, uid)
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
         style = opt.widget.style()
@@ -163,6 +182,113 @@ class RowDelegate(QStyledItemDelegate):
         p.restore()
 
 
+    def _paint_card(self, p: QPainter, option, mod: InstalledMod, uid: str):
+        p.save()
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(option.rect).adjusted(6, 6, -6, -6)
+        selected = bool(option.state & QStyle.State_Selected)
+        hovered = bool(option.state & QStyle.State_MouseOver)
+        dim = not mod.enabled
+        path = QPainterPath()
+        path.addRoundedRect(r, 8, 8)
+        p.fillPath(path, QColor(theme.PANEL))
+        if selected or hovered:
+            p.setPen(QPen(QColor(theme.ACCENT if selected else theme.ACCENT_LO), 1.5))
+            p.drawPath(path)
+        img_h = r.width() * 9 / 16
+        img = QRectF(r.left(), r.top(), r.width(), img_h)
+        p.save()
+        clip = QPainterPath()
+        clip.setFillRule(Qt.WindingFill)
+        clip.addRoundedRect(img, 8, 8)
+        clip.addRect(QRectF(img.left(), img.top() + 10, img.width(), img_h - 10))
+        p.setClipPath(clip.simplified())
+        pix = self.page.images.get(mod.thumb_url) if mod.thumb_url else None
+        if pix is not None and not pix.isNull():
+            scaled = pix.scaled(int(img.width()), int(img.height()), Qt.KeepAspectRatioByExpanding,
+                                Qt.SmoothTransformation)
+            sx = (scaled.width() - img.width()) / 2
+            sy = (scaled.height() - img.height()) / 2
+            if dim:
+                p.setOpacity(0.35)
+            p.drawPixmap(img.toRect(), scaled, QRect(int(sx), int(sy), int(img.width()), int(img.height())))
+            p.setOpacity(1)
+        else:
+            p.fillRect(img, QColor(theme.RAISED if not dim else theme.BG))
+            p.setPen(QColor(theme.LINE))
+            p.setFont(theme.display_font(30))
+            p.drawText(img, Qt.AlignCenter, (mod.name[:1] or "?").upper())
+        p.restore()
+        # rank badge (top-left) and toggle (top-right)
+        rank = self.page.rank.get(uid)
+        bf = QFont(p.font())
+        bf.setPixelSize(theme.px(11))
+        bf.setBold(True)
+        p.setFont(bf)
+        if rank:
+            text = f"#{rank}"
+            w = p.fontMetrics().horizontalAdvance(text) + theme.px(12)
+            br = QRectF(r.left() + theme.px(8), r.top() + theme.px(8), w, theme.px(20))
+            bp = QPainterPath()
+            bp.addRoundedRect(br, theme.px(10), theme.px(10))
+            p.fillPath(bp, QColor(theme.ACCENT))
+            p.setPen(QColor(theme.ON_ACCENT))
+            p.drawText(br, Qt.AlignCenter, text)
+        tr = self._toggle_rect(option.rect)
+        tp = QPainterPath()
+        tp.addRoundedRect(tr, 5, 5)
+        if mod.enabled:
+            p.fillPath(tp, QColor(theme.ACCENT))
+            p.setPen(QPen(QColor(theme.ON_ACCENT), 2))
+            tl = tr.topLeft()
+            p.drawPolyline(QPolygonF([tl + QPointF(tr.width() * .25, tr.height() * .52),
+                                      tl + QPointF(tr.width() * .43, tr.height() * .70),
+                                      tl + QPointF(tr.width() * .76, tr.height() * .32)]))
+        else:
+            p.fillPath(tp, QColor(theme.BG))
+            p.setPen(QPen(QColor(theme.MUTED), 1.4))
+            p.drawPath(tp)
+        # status badges along the bottom of the image
+        badges = []
+        if mod.update:
+            badges.append(("Update", theme.ACCENT, theme.ON_ACCENT))
+        c = self.page.conflicts.get(uid)
+        if mod.enabled and c:
+            if c.losing:
+                badges.append((f"Overridden ×{c.losing}", theme.DANGER_BG, theme.DANGER_TEXT))
+            elif c.winning:
+                badges.append((f"Wins ×{c.winning}", theme.OK_BG, theme.VERDIGRIS))
+        bx = r.left() + theme.px(8)
+        for text, bg, fg in badges:
+            w = p.fontMetrics().horizontalAdvance(text) + theme.px(12)
+            br = QRectF(bx, img.bottom() - theme.px(26), w, theme.px(20))
+            bp = QPainterPath()
+            bp.addRoundedRect(br, theme.px(10), theme.px(10))
+            p.fillPath(bp, QColor(bg))
+            p.setPen(QColor(fg))
+            p.drawText(br, Qt.AlignCenter, text)
+            bx += w + theme.px(6)
+        # name + author
+        f = QFont(p.font())
+        f.setPixelSize(theme.px(13))
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QColor(theme.MUTED if dim else theme.TEXT))
+        tw = r.width() - theme.px(20)
+        p.drawText(QRectF(r.left() + theme.px(10), img.bottom() + theme.px(6), tw, theme.px(20)),
+                   Qt.AlignLeft | Qt.AlignVCenter, p.fontMetrics().elidedText(mod.name, Qt.ElideRight, int(tw)))
+        f.setBold(False)
+        f.setPixelSize(theme.px(12))
+        p.setFont(f)
+        p.setPen(QColor(theme.MUTED))
+        sub = (f"by {mod.author}" if mod.author else ("Local file" if mod.source == "local" else "GameBanana"))
+        if dim:
+            sub += "    off"
+        p.drawText(QRectF(r.left() + theme.px(10), img.bottom() + theme.px(26), tw, theme.px(18)),
+                   Qt.AlignLeft | Qt.AlignVCenter, p.fontMetrics().elidedText(sub, Qt.ElideRight, int(tw)))
+        p.restore()
+
+
 class ModList(QListWidget):
     reordered = Signal()
 
@@ -177,6 +303,41 @@ class ModList(QListWidget):
         # Scroll while dragging near the top or bottom edge (a row's height, not Qt's 16px).
         self.setAutoScroll(True)
         self.setAutoScrollMargin(theme.px(70))
+
+    def set_mode(self, mode: str):
+        delegate = self.itemDelegate()
+        if isinstance(delegate, RowDelegate):
+            delegate.mode = mode
+        if mode == "grid":
+            self.setViewMode(QListWidget.IconMode)
+            self.setFlow(QListWidget.LeftToRight)
+            self.setWrapping(True)
+        else:
+            self.setViewMode(QListWidget.ListMode)
+            self.setFlow(QListWidget.TopToBottom)
+            self.setWrapping(False)
+        self.setResizeMode(QListWidget.Adjust)
+        self.setMovement(QListWidget.Static)   # Static + InternalMove = drop reorders items
+        self.relayout()
+
+    def relayout(self):
+        delegate = self.itemDelegate()
+        if not isinstance(delegate, RowDelegate):
+            return
+        avail = self.viewport().width() - 4
+        if delegate.mode == "grid":
+            cols = max(1, avail // theme.px(200))
+            w = avail // cols
+            delegate.card = QSize(w, int((w - 12) * 9 / 16) + theme.px(60))
+            self.setGridSize(delegate.card)
+        else:
+            self.setGridSize(QSize())
+        self.scheduleDelayedItemsLayout()
+        self.viewport().update()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.relayout()
 
     def dropEvent(self, e):
         super().dropEvent(e)
@@ -194,6 +355,7 @@ class DetailPanel(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.body = QWidget()
         self.body.setObjectName("DetailPanel")
+        self.body.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.setWidget(self.body)
         self.lay = QVBoxLayout(self.body)
         self.lay.setContentsMargins(16, 16, 16, 16)
@@ -228,6 +390,7 @@ class DetailPanel(QScrollArea):
         title = QLabel(mod.name)
         title.setObjectName("DetailTitle")
         title.setWordWrap(True)
+        title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.lay.addWidget(title)
         info = []
         if mod.source == "gamebanana":
@@ -243,6 +406,7 @@ class DetailPanel(QScrollArea):
         meta = QLabel("\n".join(info))
         meta.setObjectName("Muted")
         meta.setWordWrap(True)
+        meta.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.lay.addWidget(meta)
 
         row = QHBoxLayout()
@@ -368,6 +532,23 @@ class InstalledPage(QWidget):
         self.filter.setFixedWidth(220)
         self.filter.textChanged.connect(self._apply_filter)
         top.addWidget(self.filter)
+        top.addSpacing(8)
+        self.view_group = QButtonGroup(self)
+        for i, (label, mode) in enumerate((("Grid", "grid"), ("List", "list"))):
+            b = QPushButton(label)
+            b.setCheckable(True)
+            b.setProperty("kind", "toggle")
+            b.setProperty("mode", mode)
+            radius = "border-top-left-radius:5px;border-bottom-left-radius:5px;" if i == 0 else \
+                "border-top-right-radius:5px;border-bottom-right-radius:5px;"
+            b.setStyleSheet(f"QPushButton {{ {radius} padding: 4px 12px; }}")
+            self.view_group.addButton(b, i)
+            top.addWidget(b)
+            if mode == manager.lib.settings.installed_view:
+                b.setChecked(True)
+        if not self.view_group.checkedButton():
+            self.view_group.button(0).setChecked(True)
+        self.view_group.idToggled.connect(lambda i, on: on and self._view_changed(self.view_group.button(i).property("mode")))
         cl.addLayout(top)
 
         actions = QHBoxLayout()
@@ -398,13 +579,15 @@ class InstalledPage(QWidget):
         actions.addWidget(all_off)
         cl.addLayout(actions)
 
-        hint = QLabel("Drag to reorder. Higher in the list wins when two mods change the same file.")
-        hint.setObjectName("Muted")
-        cl.addWidget(hint)
+        self.hint = QLabel()
+        self.hint.setObjectName("Muted")
+        cl.addWidget(self.hint)
 
         self.list = ModList()
         self.delegate = RowDelegate(self)
         self.list.setItemDelegate(self.delegate)
+        self.list.set_mode(manager.lib.settings.installed_view if manager.lib.settings.installed_view in ("grid", "list") else "grid")
+        self._set_hint()
         self.list.reordered.connect(self._reordered)
         self.list.itemChanged.connect(self._item_changed)
         self.list.currentItemChanged.connect(self._current_changed)
@@ -424,9 +607,24 @@ class InstalledPage(QWidget):
         images.loaded.connect(lambda _u: self.list.viewport().update())
         self._building = False
 
+    def _set_hint(self):
+        if self.delegate.mode == "grid":
+            self.hint.setText("Drag to reorder: #1 loads first and wins when two mods change the same file. "
+                              "Click the box on a card to turn it off or on.")
+        else:
+            self.hint.setText("Drag to reorder. Higher in the list wins when two mods change the same file.")
+
+    def _view_changed(self, mode: str):
+        self.mgr.lib.settings.installed_view = mode
+        self.mgr.lib.save()
+        self.list.set_mode(mode)
+        self._set_hint()
+        self.reload()
+
     def rescale(self):
         self.detail.setFixedWidth(theme.px(360))
         self.list.setAutoScrollMargin(theme.px(70))
+        self.list.relayout()
         self.list.reset()
         self.reload()
 

@@ -105,6 +105,9 @@ class Settings:
     ui_scale: str = "Normal"         # see theme.SCALES
     theme_preset: str = "Sapphire"   # see theme.PRESETS
     theme_colors: dict = field(default_factory=dict)   # token -> hex overrides
+    installed_view: str = "grid"     # Installed page: "grid" or "list"
+    discord_presence: bool = False
+    discord_app_id: str = ""
 
 
 class Library:

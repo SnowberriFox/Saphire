@@ -251,7 +251,25 @@ def main():
 
     def conflicts():
         win.installed.list.setCurrentRow(3)
-        QTimer.singleShot(800, lambda: (shot("3-installed-conflict"), profiles()))
+        QTimer.singleShot(800, lambda: (shot("3-installed-conflict"), installed_list()))
+
+    def installed_list():
+        win.installed.view_group.button(1).setChecked(True)
+        QTimer.singleShot(800, lambda: (shot("3b-installed-list"), downloads()))
+
+    def downloads():
+        from sapphire.ui.downloads import Job
+        j1 = win.jobs.add(Job("Clockwork Abrams", kind="install")); win.jobs.update(j1, state="running", stage="Downloading", done=18_000_000, total=45_800_000)
+        j2 = win.jobs.add(Job("Soul Orb Sound Pack", kind="update"))
+        j3 = win.jobs.add(Job("Midnight Carnival Wraith", kind="install")); win.jobs.update(j3, state="done")
+        j4 = win.jobs.add(Job("Shiv Voice Lines EN Remix", kind="install")); win.jobs.update(j4, state="failed", error="Download was incomplete, try again")
+        win.go(3)
+        def after():
+            shot("3c-downloads")
+            for j in (j1, j2):
+                win.jobs.update(j, state="done")
+            profiles()
+        QTimer.singleShot(600, after)
 
     def profiles():
         win.go(2)
@@ -259,7 +277,7 @@ def main():
         QTimer.singleShot(400, lambda: (shot("4-profiles"), settings()))
 
     def settings():
-        win.go(3)
+        win.go(4)
         QTimer.singleShot(400, lambda: (shot("5-settings"), listview()))
 
     def listview():
@@ -279,7 +297,7 @@ def main():
         mgr.lib.settings.theme_colors = {"accent": "#B5423A"}
         mgr.lib.settings.ui_scale = "Normal"
         win.apply_appearance()
-        win.go(3)
+        win.go(4)
         win.settings._refresh_swatches()
         QTimer.singleShot(800, lambda: (shot("10-parchment-settings"), restore_theme()))
 
@@ -288,6 +306,7 @@ def main():
         mgr.lib.settings.theme_colors = {}
         win.apply_appearance()
         win.browse.view_group.button(0).setChecked(True)
+        win.installed.view_group.button(0).setChecked(True)
         importdlg()
 
     def importdlg():
@@ -336,7 +355,7 @@ def main():
         win.install_gb("Mod", target.id, None)
 
         def check():
-            if win.jobs:
+            if win.jobs.running() or any(j.state == "queued" and j.kind == "install" and j.label.startswith("GameBanana") for j in win.jobs.jobs):
                 return QTimer.singleShot(200, check)
             mod = mgr.lib.by_gb("Mod", target.id)
             print("chooser asked:", asked)

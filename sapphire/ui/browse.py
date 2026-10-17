@@ -43,6 +43,34 @@ def fmt_date(ts: int) -> str:
     return d.strftime("%-d %b %Y")
 
 
+class ElidedLabel(QLabel):
+    """A label that never widens its parent: long text is elided in the middle."""
+
+    def __init__(self, text: str = "", bold: bool = False):
+        super().__init__()
+        self._full = text
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        if bold:
+            self.setStyleSheet("background: transparent; font-weight: 600;")
+        else:
+            self.setStyleSheet("background: transparent;")
+        self.setToolTip(text)
+        self.setMinimumWidth(40)
+
+    def setText(self, text: str):  # noqa: N802 - Qt naming
+        self._full = text
+        self.setToolTip(text)
+        self._apply()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._apply()
+
+    def _apply(self):
+        fm = self.fontMetrics()
+        super().setText(fm.elidedText(self._full, Qt.ElideMiddle, max(20, self.width() - 4)))
+
+
 # ---------------------------------------------------------------- grid model
 
 class SubmissionModel(QAbstractListModel):
@@ -342,9 +370,7 @@ class FileRow(QFrame):
         lay.setContentsMargins(10, 8, 10, 8)
         lay.setSpacing(4)
         top = QHBoxLayout()
-        name = QLabel(f.filename)
-        name.setStyleSheet("background: transparent; font-weight: 600;")
-        name.setWordWrap(True)
+        name = ElidedLabel(f.filename, bold=True)
         top.addWidget(name, 1)
         btn = QPushButton({"current": "Reinstall", "update": "Update to this",
                            "older": "Install this version"}.get(state, "Install"))
@@ -382,6 +408,7 @@ class DetailPane(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.body = QWidget()
         self.body.setObjectName("DetailPanel")
+        self.body.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.setWidget(self.body)
         self.lay = QVBoxLayout(self.body)
         self.lay.setContentsMargins(16, 16, 16, 16)
@@ -494,6 +521,7 @@ class DetailPane(QScrollArea):
         title = QLabel(sub.name)
         title.setObjectName("DetailTitle")
         title.setWordWrap(True)
+        title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.lay.addWidget(title)
         author = QPushButton(f"by {sub.author or 'unknown'}")
         author.setToolTip("Show everything by this author")
@@ -506,6 +534,7 @@ class DetailPane(QScrollArea):
         meta = QLabel(f"{sub.category_label or sub.model}\n♥ {fmt_count(sub.likes)}    "
                       f"{fmt_count(sub.views)} views    updated {fmt_date(sub.date_modified)}")
         meta.setObjectName("Muted")
+        meta.setWordWrap(True)
         self.lay.addWidget(meta)
         open_btn = QPushButton("Open on GameBanana")
         open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(sub.url or f"https://gamebanana.com/mods/{sub.id}")))
@@ -918,6 +947,7 @@ class BrowsePage(QWidget):
         if self.filters.search.text().strip():
             key = self.filters.sort.currentData()
             sort_key = {"popular": lambda s: -s.likes, "views": lambda s: -s.views,
+                        "downloads": lambda s: -(s.downloads or s.likes),
                         "newest": lambda s: -s.date_added, "updated": lambda s: -s.date_modified}.get(key)
         self.model.extend(items, sort_key)
         self._shown = len(self.model.items)

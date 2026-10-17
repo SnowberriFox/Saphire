@@ -415,7 +415,9 @@ def read_grimoire(game_dir: Path, data_dir: Path | None = None, home: Path | Non
                 model = "Mod"
                 key = f"{model}-{gb_id}-{file_id}" if file_id else f"{model}-{gb_id}"
                 if key not in groups:
-                    groups[key] = ImportMod(key=key, name=str(pm.get("fileName") or f"GameBanana mod {gb_id}"),
+                    fname = str(pm.get("fileName") or "")
+                    nice = fname if fname and not PAK_NAME_RE.match(fname) else f"GameBanana mod {gb_id}"
+                    groups[key] = ImportMod(key=key, name=nice,
                                             model=model, gb_id=gb_id, file_id=file_id, enabled=bool(pm.get("enabled")),
                                             order=10**6)
                     plan.mods.append(groups[key])

@@ -159,6 +159,7 @@ class SettingsPage(QWidget):
     app_update_requested = Signal()
     appearance_changed = Signal()
     clear_requested = Signal()
+    discord_changed = Signal()
 
     def __init__(self, manager):
         super().__init__()
@@ -245,6 +246,27 @@ class SettingsPage(QWidget):
             grid.addLayout(cell, row, col)
         root.addLayout(grid)
         self._refresh_swatches()
+
+        root.addWidget(_section("Discord"))
+        self.discord_on = QCheckBox("Show what I'm doing in Sapphire on my Discord profile")
+        self.discord_on.setChecked(manager.lib.settings.discord_presence)
+        self.discord_on.toggled.connect(self._discord_toggled)
+        root.addWidget(self.discord_on)
+        drow = QHBoxLayout()
+        drow.addWidget(QLabel("Application ID"))
+        self.discord_id = QLineEdit(manager.lib.settings.discord_app_id)
+        self.discord_id.setPlaceholderText("e.g. 1234567890123456789")
+        self.discord_id.setFixedWidth(260)
+        self.discord_id.editingFinished.connect(self._discord_id_changed)
+        drow.addWidget(self.discord_id)
+        drow.addStretch(1)
+        root.addLayout(drow)
+        dhint = QLabel("Talks only to the Discord app on this computer; nothing is sent anywhere else. It needs a "
+                       "Discord Application ID: at discord.com/developers/applications click New Application, call it "
+                       "Sapphire, and copy its Application ID here. One ID can be shared by everyone who uses it.")
+        dhint.setObjectName("Muted")
+        dhint.setWordWrap(True)
+        root.addWidget(dhint)
 
         root.addWidget(_section("Game files"))
         g = QHBoxLayout()
@@ -362,6 +384,18 @@ class SettingsPage(QWidget):
         self.mgr.lib.save()
         self.appearance_changed.emit()
         self._refresh_swatches()
+
+    def _discord_toggled(self, on):
+        self.mgr.lib.settings.discord_presence = on
+        self.mgr.lib.save()
+        self.discord_changed.emit()
+
+    def _discord_id_changed(self):
+        cid = "".join(ch for ch in self.discord_id.text() if ch.isdigit())
+        self.discord_id.setText(cid)
+        self.mgr.lib.settings.discord_app_id = cid
+        self.mgr.lib.save()
+        self.discord_changed.emit()
 
     def set_update_state(self, rel, installed=None):
         from sapphire.updater import REPO, running_from_source

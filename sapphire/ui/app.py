@@ -22,9 +22,11 @@ from sapphire.gamebanana import Cancelled
 from sapphire.ui import theme
 from sapphire.ui.browse import BrowsePage
 from sapphire.ui.dialogs import choose_variants, confirm, error
+from sapphire.ui.downloads import DownloadsPage, Job, JobList
 from sapphire.ui.images import ImageCache
 from sapphire.ui.importing import ImportDialog
 from sapphire.ui.installed import InstalledPage
+from sapphire.discord import Presence
 from sapphire.ui.onboarding import OnboardingDialog
 from sapphire.ui.pages import ProfilesPage, SettingsPage
 from sapphire.updater import Updater, UpdateError, restart, running_from_source
@@ -32,12 +34,8 @@ from sapphire.ui.workers import JOB_POOL, NET_POOL, MainThreadCaller, run
 
 log = logging.getLogger("sapphire")
 MOD_FILE_TYPES = (".zip", ".7z", ".rar", ".vpk")
-
-
-class Job:
-    def __init__(self, label: str):
-        self.label = label
-        self.cancel = threading.Event()
+PRESENCE_IMAGE = "https://raw.githubusercontent.com/SnowberriFox/Saphire/main/sapphire/assets/sapphire-512.png"
+PRESENCE_URL = "https://github.com/SnowberriFox/Saphire"
 
 
 class MainWindow(QMainWindow):
@@ -51,7 +49,9 @@ class MainWindow(QMainWindow):
         self.caller = MainThreadCaller()
         self.images = ImageCache(manager.gb.session)
         self.updater = Updater(manager.gb.session)
-        self.jobs: list[Job] = []
+        self.jobs = JobList()
+        self.jobs.changed.connect(self._jobs_ui)
+        self.presence = Presence(manager.lib.settings.discord_app_id if manager.lib.settings.discord_presence else "")
         self.running = False
         self._applying = False
         self._apply_again = False
@@ -104,8 +104,9 @@ class MainWindow(QMainWindow):
         self.browse = BrowsePage(manager, self.images)
         self.installed = InstalledPage(manager, self.images)
         self.profiles = ProfilesPage(manager)
+        self.downloads = DownloadsPage(self.jobs)
         self.settings = SettingsPage(manager)
-        for page in (self.browse, self.installed, self.profiles, self.settings):
+        for page in (self.browse, self.installed, self.profiles, self.downloads, self.settings):
             self.stack.addWidget(page)
         outer.addWidget(self.stack, 1)
         self.setCentralWidget(central)
@@ -131,6 +132,7 @@ class MainWindow(QMainWindow):
         self.settings.import_requested.connect(self.import_from)
         self.settings.app_update_requested.connect(lambda: self.check_app_update(manual=True))
         self.settings.appearance_changed.connect(self.apply_appearance)
+        self.settings.discord_changed.connect(self.update_presence)
         self.installed.reapply_requested.connect(self.reapply)
 
         self._apply_timer = QTimer(self, singleShot=True, interval=600)
@@ -160,7 +162,7 @@ class MainWindow(QMainWindow):
         lay.addSpacing(18)
         self.nav = QButtonGroup(self)
         self.nav_buttons = []
-        for i, label in enumerate(("Browse", "Installed", "Profiles", "Settings")):
+        for i, label in enumerate(("Browse", "Installed", "Profiles", "Downloads", "Settings")):
             b = QPushButton(label)
             b.setObjectName("NavButton")
             b.setCheckable(True)
@@ -208,8 +210,9 @@ class MainWindow(QMainWindow):
             self.browse.start()
         elif index == 2:
             self.profiles.reload()
-        elif index == 3:
+        elif index == 4:
             self.settings.refresh()
+        self.update_presence()
 
     def say(self, text: str, ms: int = 8000):
         self.msg.setText(text)
@@ -232,6 +235,8 @@ class MainWindow(QMainWindow):
         on = sum(1 for m in mods if m.enabled)
         updates = sum(1 for m in mods if m.update)
         self.nav_buttons[1].setText(f"Installed  {len(mods)}" + (f"  ({updates} updates)" if updates else ""))
+        active = len(self.jobs.active())
+        self.nav_buttons[3].setText(f"Downloads  {active}" if active else "Downloads")
         gd = self.mgr.lib.game_dir and steam.is_valid_game_dir(self.mgr.lib.game_dir)
         if not gd:
             state, text = "bad", "Deadlock not found"
@@ -263,11 +268,34 @@ class MainWindow(QMainWindow):
         self.installed.reload()
         self.browse.library_changed()
         self._refresh_nav()
+        self.update_presence()
+
+    def update_presence(self):
+        st = self.mgr.lib.settings
+        if not st.discord_presence or not st.discord_app_id.strip():
+            self.presence.clear()
+            self.presence.set_client_id("")
+            return
+        self.presence.set_client_id(st.discord_app_id)
+        self.presence.start()
+        mods = self.mgr.lib.ordered()
+        on = sum(1 for m in mods if m.enabled)
+        page = self.stack.currentIndex()
+        if self.running:
+            details = "In Deadlock"
+        else:
+            details = {0: "Browsing mods", 1: "Managing mods", 2: "Switching profiles",
+                       3: "Downloading mods", 4: "In settings"}.get(page, "Managing mods")
+        state = f"{on} mod{'s' if on != 1 else ''} active" + (f" · {len(mods)} installed" if len(mods) != on else "")
+        self.presence.update(details, state, large_image=PRESENCE_IMAGE, large_text="Sapphire for Deadlock",
+                             buttons=[{"label": "Get Sapphire", "url": PRESENCE_URL}])
 
     def _tick(self):
         was = self.running
         self.running = steam.is_game_running()
         self._ticks += 1
+        if was != self.running:
+            self.update_presence()
         if was and not self.running:
             self.say("Deadlock closed.")
             QTimer.singleShot(1500, self._after_game_closed)
@@ -310,7 +338,7 @@ class MainWindow(QMainWindow):
 
     def _start_pages(self):
         if not self.mgr.game_dir:
-            self.go(3)
+            self.go(4)
             self._refresh_nav()
         else:
             self.go(0 if not self.mgr.lib.mods else 1)
@@ -362,7 +390,7 @@ class MainWindow(QMainWindow):
             if isinstance(exc, GameRunning):
                 self.running = True
             elif isinstance(exc, NoGame):
-                self.go(3)
+                self.go(4)
             else:
                 error(self, "Couldn't apply mods", str(exc))
             self._after_apply()
@@ -467,64 +495,64 @@ class MainWindow(QMainWindow):
             self.say("Profile loaded. Apply changes to use it in game.")
 
     # -------------------------------------------------------------- jobs
-    def _job_started(self, job: Job):
-        self.jobs.append(job)
-        self._jobs_ui()
-
-    def _job_finished(self, job: Job):
-        if job in self.jobs:
-            self.jobs.remove(job)
-        self._jobs_ui()
-
-    def _jobs_ui(self, done: int = 0, total: int = 0, stage: str = ""):
-        visible = bool(self.jobs)
+    def _jobs_ui(self):
+        active = self.jobs.active()
+        running = self.jobs.running()
+        visible = bool(active)
         for w in (self.job_label, self.job_bar, self.job_cancel):
             w.setVisible(visible)
+        self._refresh_nav()
         if not visible:
             return
-        job = self.jobs[0]
-        extra = f"  (+{len(self.jobs) - 1} queued)" if len(self.jobs) > 1 else ""
-        self.job_label.setText(f"{stage or 'Waiting'}: {job.label}{extra}")
-        if total:
+        job = running or active[-1]
+        extra = f"  (+{len(active) - 1} queued)" if len(active) > 1 else ""
+        self.job_label.setText(f"{job.stage or 'Waiting'}: {job.label}{extra}")
+        if job.total:
             self.job_bar.setRange(0, 1000)
-            self.job_bar.setValue(int(done / total * 1000))
+            self.job_bar.setValue(int(job.done / job.total * 1000))
         else:
             self.job_bar.setRange(0, 0)
 
     def _cancel_jobs(self):
-        for job in self.jobs:
+        for job in self.jobs.active():
             job.cancel.set()
+            if job.state == "queued":
+                self.jobs.update(job, state="cancelled")
 
     def _chooser(self, sets, name):
         return self.caller.call(choose_variants, self, sets, name)
 
-    def _queue(self, label: str, fn, *args, success: str = ""):
-        job = Job(label)
-        self._job_started(job)
+    def _queue(self, label: str, fn, *args, success: str = "", kind: str = "install", silent: bool = False):
+        job = Job(label, kind=kind)
+        job.retry = lambda: self._queue(label, fn, *args, success=success, kind=kind, silent=silent)
+        self.jobs.add(job)
 
         def progress(stage, done, total):
-            if self.jobs and self.jobs[0] is job:
-                self._jobs_ui(done, total, stage)
+            self.jobs.update(job, state="running", stage=stage, done=done, total=total)
 
         def worker(progress=None):
             if job.cancel.is_set():
                 raise Cancelled()
+            self.jobs.update(job, state="running", stage="Starting")
             return fn(*args, choose=self._chooser, progress=progress, cancel=job.cancel)
 
-        def done(mod):
-            self._job_finished(job)
-            self.say(success.format(name=getattr(mod, "name", label)))
+        def done(result):
+            self.jobs.update(job, state="done", stage="Done")
+            if not silent:
+                self.say(success.format(name=getattr(result, "name", label)))
             self._library_changed()
             self.request_apply()
 
         def failed(exc):
-            self._job_finished(job)
-            if isinstance(exc, Cancelled):
+            if isinstance(exc, Cancelled) or job.cancel.is_set():
+                self.jobs.update(job, state="cancelled")
                 self.say(f"Cancelled: {label}")
                 return
-            error(self, "Install failed", f"{label}\n\n{exc}")
+            self.jobs.update(job, state="failed", error=str(exc))
+            self.say(f"Failed: {label}. See Downloads.", 12000)
 
         run(worker, on_done=done, on_error=failed, on_progress=progress, pool=JOB_POOL)
+        return job
 
     def install_gb(self, model: str, gb_id: int, file=None):
         existing = self.mgr.lib.by_gb(model, gb_id)
@@ -544,7 +572,7 @@ class MainWindow(QMainWindow):
 
         def do(uid, choose=None, progress=None, cancel=None):
             return self.mgr.update(uid, choose=choose, progress=progress, cancel=cancel)
-        self._queue(mod.name, do, uid, success="Updated {name}.")
+        self._queue(mod.name, do, uid, success="Updated {name}.", kind="update")
 
     def update_all(self):
         for mod in [m for m in self.mgr.lib.ordered() if m.update]:
@@ -568,19 +596,18 @@ class MainWindow(QMainWindow):
         plan = dlg.plan
         profiles_only = dlg.profiles_only.isChecked()
         label = f"Import from {plan.source}"
-        job = Job(label)
-        self._job_started(job)
+        job = self.jobs.add(Job(label, kind="import"))
 
         def progress(stage, done, total):
-            if self.jobs and self.jobs[0] is job:
-                self._jobs_ui(done, total, stage)
+            self.jobs.update(job, state="running", stage=stage, done=done, total=total)
 
         def worker(progress=None):
+            self.jobs.update(job, state="running", stage="Starting")
             return self.mgr.run_import(plan, choose=self._chooser, progress=progress, cancel=job.cancel,
                                        profiles_only=profiles_only)
 
         def done(res):
-            self._job_finished(job)
+            self.jobs.update(job, state="done")
             self._library_changed()
             self.request_apply()
             if profiles_only:
@@ -599,10 +626,11 @@ class MainWindow(QMainWindow):
                 self.identify(unknown)
 
         def failed(exc):
-            self._job_finished(job)
             if isinstance(exc, Cancelled):
+                self.jobs.update(job, state="cancelled")
                 self.say("Import cancelled.")
             else:
+                self.jobs.update(job, state="failed", error=str(exc))
                 error(self, "Import failed", str(exc))
             self._library_changed()
 
@@ -652,11 +680,9 @@ class MainWindow(QMainWindow):
                 what = "" if rel.source == "release" else " (latest from the main branch)"
                 self.update_label.setText(f"Sapphire {rel.version} is available{what}. You have {__version__}.")
                 self.update_notes.setVisible(bool(rel.url))
-                try:
-                    self.update_notes.clicked.disconnect()
-                except RuntimeError:
-                    pass
-                self.update_notes.clicked.connect(lambda: self._show_notes(rel))
+                if getattr(self, "_notes_conn", None) is not None:
+                    self.update_notes.clicked.disconnect(self._notes_conn)
+                self._notes_conn = self.update_notes.clicked.connect(lambda: self._show_notes(rel))
                 self.update_go.setText(f"Update to {rel.version}")
                 self.update_go.setEnabled(True)
                 self.update_later.show()
@@ -697,20 +723,18 @@ class MainWindow(QMainWindow):
             return
         self.update_go.setEnabled(False)
         self.update_later.hide()
-        job = Job(f"Sapphire {rel.version}")
-        self._job_started(job)
+        job = self.jobs.add(Job(f"Sapphire {rel.version}", kind="app-update"))
 
         def progress(stage, done, total):
             self.update_label.setText(f"{stage} Sapphire {rel.version}…")
-            if self.jobs and self.jobs[0] is job:
-                self._jobs_ui(done, total, stage)
+            self.jobs.update(job, state="running", stage=stage, done=done, total=total)
 
         def done(_):
-            self._job_finished(job)
+            self.jobs.update(job, state="done")
             self._show_restart()
 
         def failed(exc):
-            self._job_finished(job)
+            self.jobs.update(job, state="failed", error=str(exc))
             self.update_go.setEnabled(True)
             self.update_later.show()
             self.update_label.setText(f"Update to {rel.version} failed.")
@@ -726,17 +750,16 @@ class MainWindow(QMainWindow):
         self.update_notes.hide()
         self.update_go.setText("Restart now")
         self.update_go.setEnabled(True)
-        try:
-            self.update_go.clicked.disconnect()
-        except RuntimeError:
-            pass
-        self.update_go.clicked.connect(self._restart)
+        if not getattr(self, "_restart_wired", False):
+            self.update_go.clicked.disconnect(self.install_app_update)
+            self.update_go.clicked.connect(self._restart)
+            self._restart_wired = True
         self.update_later.show()
         self.update_bar.show()
         self.settings.set_update_state(None, installed=rel)
 
     def _restart(self):
-        if self.jobs and not confirm(self, "Restart Sapphire", "Downloads are still running. Restart anyway?", "Restart"):
+        if self.jobs.active() and not confirm(self, "Restart Sapphire", "Downloads are still running. Restart anyway?", "Restart"):
             return
         self._cancel_jobs()
         self.mgr.lib.save()
@@ -799,10 +822,11 @@ class MainWindow(QMainWindow):
                 self.install_file(path)
 
     def closeEvent(self, e):
-        if self.jobs and not confirm(self, "Quit Sapphire", "Downloads are still running. Quit anyway?", "Quit"):
+        if self.jobs.active() and not confirm(self, "Quit Sapphire", "Downloads are still running. Quit anyway?", "Quit"):
             e.ignore()
             return
         self._cancel_jobs()
+        self.presence.stop()
         e.accept()
 
 

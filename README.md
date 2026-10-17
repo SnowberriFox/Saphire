@@ -59,6 +59,11 @@ To uninstall: `./uninstall.sh` (keeps your mod library) or `./uninstall.sh --pur
   side panel lists the exact files. Tick boxes turn mods on and off.
 - **Profiles**: save a setup (which mods are on plus their order) and switch in one
   click.
+- **Downloads**: a page listing every install and update with progress, cancel and
+  retry. Downloads run one at a time in the order you started them.
+- **Discord**: optional Rich Presence (Settings → Discord). It needs a Discord
+  Application ID, which anyone can create for free at
+  discord.com/developers/applications; one ID can be shared.
 - **Reapply** (Installed page): turns every mod off and back on by rewriting the
   whole addons folder, for when something looks wrong in game.
 - **Launch Deadlock**: applies everything, double-checks `gameinfo.gi`, then
@@ -142,6 +147,7 @@ Code map:
 | `sapphire/importers.py` | Reads Deadlock Mod Manager and Grimoire data into an import plan |
 | `sapphire/core.py` | The manager: install, update, apply, profiles, import, identify |
 | `sapphire/updater.py` | Checks GitHub for a newer Sapphire and installs it in place |
+| `sapphire/discord.py` | Discord Rich Presence over the local IPC socket |
 | `sapphire/ui/` | The Qt interface (`onboarding.py` is the first-run wizard, `theme.py` the themes) |
 
 Data lives in `~/.local/share/sapphire` (`SAPPHIRE_HOME` overrides it, handy for
