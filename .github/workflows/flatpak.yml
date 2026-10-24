@@ -6,6 +6,9 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: write   # attach the bundle to tagged releases
+
 jobs:
   flatpak:
     name: Build the Flatpak bundle
