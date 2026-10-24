@@ -65,6 +65,9 @@ class InstalledMod:
     updated_at: int = 0
     update: UpdateInfo | None = None
     note: str = ""
+    audio_url: str = ""               # GameBanana's preview clip, for sound mods
+    previous: dict | None = None      # the version before the last update, for roll back
+    skip_file_id: int = 0             # rolled back from this file: auto-update leaves it alone
 
     @property
     def folder(self) -> Path:
@@ -114,6 +117,10 @@ class Settings:
     discord_presence: bool = False
     discord_app_id: str = ""
     fix_camera: bool = True          # repair the first-person camera on skins made before the camera update
+    auto_update: bool = False        # install mod updates as soon as a check finds them
+    one_skin_per_hero: bool = False  # turning a skin on turns the hero's other skins off
+    helper: bool = False             # background helper that keeps gameinfo.gi patched
+    favourites_only: bool = False    # Browse filter
 
 
 class Library:
@@ -126,6 +133,7 @@ class Library:
         self.profiles: dict[str, Profile] = {}
         self.active_profile: str | None = None
         self.deployed: dict[str, dict] = {}  # "addons/pak01_dir.vpk" -> {src,size,mtime_ns}
+        self.favourites: dict[str, dict] = {}  # "Mod:123" -> the submission as last seen
         self.load()
 
     # ------------------------------------------------------------- persistence
@@ -163,6 +171,8 @@ class Library:
                                           entries=[(u, bool(e)) for u, e in raw.get("entries", [])])
         self.active_profile = data.get("active_profile")
         self.deployed = data.get("deployed") or {}
+        fav = data.get("favourites") or {}
+        self.favourites = {k: v for k, v in fav.items() if isinstance(v, dict)} if isinstance(fav, dict) else {}
 
     def save(self) -> None:
         data = {
@@ -175,6 +185,7 @@ class Library:
                          for n, p in self.profiles.items()},
             "active_profile": self.active_profile,
             "deployed": self.deployed,
+            "favourites": self.favourites,
         }
         tmp = self.path.with_name(self.path.name + ".tmp")
         with open(tmp, "w", encoding="utf-8") as fh:
@@ -206,6 +217,32 @@ class Library:
 
     def by_gb_file(self, model: str, gb_id: int, file_id: int) -> InstalledMod | None:
         return next((m for m in self.by_gb_all(model, gb_id) if m.file_id == file_id), None)
+
+    # --------------------------------------------------------------- favourites
+    def is_favourite(self, model: str, gb_id: int) -> bool:
+        return f"{model}:{gb_id}" in self.favourites
+
+    def toggle_favourite(self, sub) -> bool:
+        """Star or unstar a GameBanana submission. Returns True if it's now a favourite."""
+        key = f"{sub.model}:{sub.id}"
+        if key in self.favourites:
+            del self.favourites[key]
+            return False
+        data = asdict(sub)
+        data["starred_at"] = int(time.time())
+        self.favourites[key] = data
+        return True
+
+    def favourite_submissions(self) -> list:
+        from sapphire.gamebanana import Submission
+        known = set(Submission.__dataclass_fields__)
+        out = []
+        for data in sorted(self.favourites.values(), key=lambda d: -int(d.get("starred_at") or 0)):
+            try:
+                out.append(Submission(**{k: v for k, v in data.items() if k in known}))
+            except TypeError:
+                continue
+        return out
 
     def add(self, mod: InstalledMod, top: bool = True) -> None:
         self.mods[mod.uid] = mod

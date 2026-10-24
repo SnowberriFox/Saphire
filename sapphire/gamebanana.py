@@ -41,6 +41,7 @@ LIST_FIELDS = ",".join([
     "_aRootCategory", "_aSubCategory", "_sVersion",
 ])
 URL_RE = re.compile(r"gamebanana\.com/(mods|sounds)/(?:[a-z]+/)?(\d+)", re.IGNORECASE)
+COLLECTION_RE = re.compile(r"gamebanana\.com/collections/(\d+)", re.IGNORECASE)
 
 
 class GameBananaError(Exception):
@@ -74,6 +75,7 @@ class Submission:
     version: str = ""
     thumb_url: str = ""
     image_urls: list[str] = field(default_factory=list)
+    audio_url: str = ""          # GameBanana-hosted preview (sound submissions)
 
     @property
     def key(self) -> str:
@@ -145,6 +147,15 @@ def _images(media) -> tuple[str, list[str]]:
     return thumb, full
 
 
+def _audio(media) -> str:
+    """The preview clip GameBanana hosts for sounds (_aPreviewMedia._aMetadata._sAudioUrl)."""
+    meta = media.get("_aMetadata") if isinstance(media, dict) else None
+    url = meta.get("_sAudioUrl") if isinstance(meta, dict) else None
+    if isinstance(url, str) and re.match(r"^https://[a-z0-9.-]*gamebanana\.com/", url):
+        return url
+    return ""
+
+
 def parse_submission(raw: dict, model: str = "Mod") -> Submission:
     thumb, images = _images(raw.get("_aPreviewMedia"))
     submitter = raw.get("_aSubmitter") or {}
@@ -170,6 +181,7 @@ def parse_submission(raw: dict, model: str = "Mod") -> Submission:
         version=str(raw.get("_sVersion") or ""),
         thumb_url=thumb,
         image_urls=images,
+        audio_url=_audio(raw.get("_aPreviewMedia")),
     )
 
 
@@ -198,6 +210,21 @@ def parse_category(raw: dict) -> Category:
         icon_url=raw.get("_sIconUrl") or "",
         children=[parse_category(c) for c in children if isinstance(c, dict)],
     )
+
+
+def parse_collection_url(text: str) -> int | None:
+    """'https://gamebanana.com/collections/164637' -> 164637."""
+    m = COLLECTION_RE.search(text or "")
+    return int(m.group(1)) if m else None
+
+
+@dataclass
+class Collection:
+    id: int
+    name: str
+    author: str = ""
+    items: list[Submission] = field(default_factory=list)   # Deadlock mods and sounds only
+    skipped: int = 0                                          # other games, WIPs, tools...
 
 
 def parse_url(text: str) -> tuple[str, int] | None:
@@ -385,6 +412,37 @@ class GameBananaClient:
         if not isinstance(data, dict):
             raise GameBananaError("Unexpected response for mod files")
         return [parse_file(f) for f in data.get("_aFiles") or [] if isinstance(f, dict)]
+
+    def collection(self, collection_id: int, max_pages: int = 40) -> Collection:
+        """A GameBanana collection and the Deadlock mods/sounds in it (15 per page)."""
+        info = self._get(f"Collection/{int(collection_id)}/ProfilePage", ttl=120)
+        if not isinstance(info, dict):
+            raise GameBananaError("Unexpected response for that collection")
+        if info.get("_bIsTrashed") or info.get("_bIsWithheld") or info.get("_bIsPrivate"):
+            raise GameBananaError("That collection isn't available.")
+        sub = info.get("_aSubmitter") or {}
+        col = Collection(id=int(collection_id), name=html.unescape(info.get("_sName") or "Collection"),
+                         author=html.unescape(sub.get("_sName") or "") if isinstance(sub, dict) else "")
+        seen: set[tuple[str, int]] = set()
+        for page in range(1, max_pages + 1):
+            data = self._get(f"Collection/{int(collection_id)}/Items", {"_nPage": page}, ttl=120)
+            records = data.get("_aRecords") if isinstance(data, dict) else None
+            for raw in records or []:
+                if not isinstance(raw, dict):
+                    continue
+                game = raw.get("_aGame")
+                wrong_game = isinstance(game, dict) and game.get("_idRow") and int(game["_idRow"]) != GAME_ID
+                if wrong_game or raw.get("_sModelName") not in MODELS or not raw.get("_bHasFiles", True):
+                    col.skipped += 1
+                    continue
+                s = parse_submission(raw, raw["_sModelName"])
+                if (s.model, s.id) not in seen:
+                    seen.add((s.model, s.id))
+                    col.items.append(s)
+            meta = data.get("_aMetadata") if isinstance(data, dict) else {}
+            if not records or (isinstance(meta, dict) and meta.get("_bIsComplete", True)):
+                break
+        return col
 
     # -- downloading -------------------------------------------------------------
     def download(self, file: GBFile, dest_dir: Path,

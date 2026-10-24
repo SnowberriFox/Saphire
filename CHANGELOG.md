@@ -3,6 +3,40 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.5.0 — 2026-10-24
+
+### Added
+- **Sound previews.** Sound mods with a preview on GameBanana get a ▶ Preview
+  button in Browse and on the Installed page, and a "♪ preview" badge on their
+  card. Clips play inside Sapphire.
+- **Favourites.** ☆ Favourite in a mod's details saves it; "Only my favourites"
+  under Show lists them (works offline). Starred cards get a ★ badge.
+- **Install a GameBanana collection.** Paste a collection link into "Install from
+  a link": Sapphire lists its Deadlock mods (ones you already have are marked),
+  you tick what you want, and it installs them.
+- **Share a profile as a file.** Profiles → "Share as a file…" saves the profile
+  (mods, order, on/off, chosen variants). "Import a profile file…" on the other
+  computer downloads every GameBanana mod it doesn't have yet, then offers to
+  switch to it. Mods added from files are listed so you know to send those too.
+- **Roll back an update.** Updating a mod (or switching it to another file) now
+  keeps the previous version. "Roll back" in its details swaps back, and rolling
+  back again goes forward. Automatic updates leave a rolled-back mod alone.
+- **Install mod updates automatically** (Settings → Behaviour, off by default).
+- **One skin per hero** (Settings → Behaviour, off by default). Turning a skin on
+  turns the other skins for that hero off. Skins are matched to heroes by the
+  models they replace, so it works for mods added from files too. Each skin's
+  details list the hero's other skins with a "Use this one" button whichever way
+  the setting is.
+- **Background helper** (Settings → Behaviour, off by default). A tiny helper
+  starts when you log in and puts the mod folders back into gameinfo.gi after a
+  Deadlock update even if Sapphire is closed, so launching from Steam still
+  loads your mods. It does nothing while Sapphire is open.
+
+### Fixed
+- A missing or half-installed PipeWire can't crash Sapphire when playing a
+  preview: Sapphire picks PulseAudio (which pipewire-pulse provides on Ubuntu and
+  Bazzite) or ALSA itself.
+
 ## 1.4.4 — 2026-10-24
 
 ### Added

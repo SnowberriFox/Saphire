@@ -87,6 +87,7 @@ def make_subs(n, start=0):
 
 
 ALL = make_subs(90)
+ALL[12].audio_url = "https://files.gamebanana.com/preview/sounds/soul_orb.mp3"
 
 
 class FakeClient(GameBananaClient):
@@ -114,6 +115,11 @@ class FakeClient(GameBananaClient):
                 "<p><b>Includes:</b> base, gold and jade variants. Works with the latest patch.</p>"
                 "<ul><li>Camera-safe proportions</li><li>No gameplay changes</li></ul>")
         return Details(submission=sub, text_html=text, files=files)
+
+    def collection(self, collection_id, max_pages=40):
+        from sapphire.gamebanana import Collection
+        return Collection(id=collection_id, name="Tamie's mod suggestions: Vanilla-ish Skins", author="Tamie",
+                          items=[ALL[0], ALL[2], ALL[3], ALL[7], ALL[12], ALL[14], ALL[20]], skipped=3)
 
     def files(self, model, mod_id):
         return self.details(model, mod_id).files
@@ -176,6 +182,11 @@ def build_state(mgr: Manager):
                            vpks=stored, installed_at=1_758_000_000, enabled=(i != 4))
         if i == 0:
             mod.update = UpdateInfo(sub.id * 10 + 2, "v2.zip", 1_759_500_000)
+            mod.previous = {"file_id": sub.id * 10, "file_name": "noir_detective_haze_v0.9.zip",
+                            "file_date": 1_745_000_000, "updated_at": 1_750_000_000, "vpks": []}
+            mgr.previous_dir(sub.key).mkdir(parents=True, exist_ok=True)
+        if sub is ALL[12]:
+            mod.audio_url = sub.audio_url
         mgr.lib.add(mod, top=False)
     mgr.lib.settings.onboarded = True
     mgr.lib.save()
@@ -314,8 +325,41 @@ def main():
             shot("3d-camera-fixed")
             win.installed.view_group.button(1).setChecked(True)
             QTimer.singleShot(500, lambda: (shot("3e-camera-list"), win.installed.view_group.button(0).setChecked(True),
-                                            setattr(mgr, "camera_report", {}), profiles()))
+                                            setattr(mgr, "camera_report", {}), planned()))
         QTimer.singleShot(900, snap)
+
+    def planned():
+        # Installed: roll back + other skins for the hero
+        win.go(1)
+        win.installed.reload()
+        win.installed.list.setCurrentRow(0)
+        def inst():
+            shot("11-installed-rollback-hero")
+            win.go(0)
+            win.browse.detail.show_sub(ALL[12])
+            QTimer.singleShot(700, fav_and_sound)
+        QTimer.singleShot(700, inst)
+
+    def fav_and_sound():
+        mgr.lib.toggle_favourite(ALL[12])
+        mgr.lib.toggle_favourite(ALL[3])
+        win.browse.detail._render()
+        shot("12-browse-sound-preview-fav")
+        win.browse.filters.favourites_only.setChecked(True)
+        def favs():
+            shot("13-browse-favourites")
+            win.browse.filters.favourites_only.setChecked(False)
+            from sapphire.ui.collection import CollectionDialog
+            dlg = CollectionDialog(mgr, 164637, win.images, win)
+            dlg.show()
+            def col():
+                app.processEvents()
+                dlg.grab().save(str(OUT / "14-collection.png"))
+                print("saved 14-collection; chosen:", [s.name for s in dlg.chosen()], "button:", dlg.ok.text())
+                dlg.close()
+                profiles()
+            QTimer.singleShot(900, col)
+        QTimer.singleShot(900, favs)
 
     def profiles():
         win.go(2)

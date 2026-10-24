@@ -8,8 +8,8 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QFileDialog, QFrame, QGridLayout,
-                               QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
-                               QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
+                               QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
+                               QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from sapphire import __version__, paths, steam
 from sapphire.ui import theme
@@ -24,6 +24,7 @@ def _section(title: str) -> QLabel:
 
 class ProfilesPage(QWidget):
     changed = Signal()
+    import_requested = Signal(object)   # path of a shared profile file
 
     def __init__(self, manager):
         super().__init__()
@@ -46,6 +47,10 @@ class ProfilesPage(QWidget):
         self.save_btn.clicked.connect(self.save_new)
         row.addWidget(self.save_btn)
         row.addStretch(1)
+        self.import_btn = QPushButton("Import a profile file…")
+        self.import_btn.setToolTip("Open a profile someone shared with you. Mods you don't have are downloaded.")
+        self.import_btn.clicked.connect(self._import)
+        row.addWidget(self.import_btn)
         root.addLayout(row)
 
         self.list = QListWidget()
@@ -70,7 +75,11 @@ class ProfilesPage(QWidget):
         self.delete_btn = QPushButton("Delete")
         self.delete_btn.setProperty("kind", "danger")
         self.delete_btn.clicked.connect(self.delete)
-        for b in (self.load_btn, self.overwrite_btn, self.rename_btn):
+        self.export_btn = QPushButton("Share as a file…")
+        self.export_btn.setToolTip("Save this profile to a file you can send. Whoever opens it gets the same "
+                                   "mods, order and variants; GameBanana mods download automatically.")
+        self.export_btn.clicked.connect(self._export)
+        for b in (self.load_btn, self.overwrite_btn, self.rename_btn, self.export_btn):
             actions.addWidget(b)
         actions.addStretch(1)
         actions.addWidget(self.delete_btn)
@@ -100,8 +109,38 @@ class ProfilesPage(QWidget):
 
     def _sync(self):
         has = self._current() is not None
-        for b in (self.load_btn, self.overwrite_btn, self.rename_btn, self.delete_btn):
+        for b in (self.load_btn, self.overwrite_btn, self.rename_btn, self.delete_btn, self.export_btn):
             b.setEnabled(has)
+
+    def _export(self):
+        from pathlib import Path
+        from sapphire.ui.dialogs import error
+        name = self._current()
+        if not name:
+            return
+        safe = "".join(c if c.isalnum() or c in " -_" else "_" for c in name).strip() or "profile"
+        dest, _ = QFileDialog.getSaveFileName(self, "Share profile", str(Path.home() / f"{safe}.sapphire-profile"),
+                                              "Sapphire profiles (*.sapphire-profile);;All files (*)")
+        if not dest:
+            return
+        try:
+            n = self.mgr.export_profile(name, dest)
+        except Exception as exc:  # noqa: BLE001
+            error(self, "Couldn't save the profile", str(exc))
+            return
+        local = sum(1 for uid, _ in self.mgr.lib.profiles[name].entries
+                    if uid in self.mgr.lib.mods and self.mgr.lib.mods[uid].source != "gamebanana")
+        note = (f" {local} of them were added from files, so whoever opens it needs those files too."
+                if local else "")
+        QMessageBox.information(self, "Profile saved",
+                                f"Saved “{name}” ({n} mod{'s' if n != 1 else ''}) to {dest}.{note}")
+
+    def _import(self):
+        from pathlib import Path
+        path, _ = QFileDialog.getOpenFileName(self, "Import a profile", str(Path.home() / "Downloads"),
+                                              "Sapphire profiles (*.sapphire-profile *.json);;All files (*)")
+        if path:
+            self.import_requested.emit(Path(path))
 
     def save_new(self):
         name = ask_text(self, "Save profile", "Profile name:")
@@ -219,6 +258,25 @@ class SettingsPage(QWidget):
         cam_hint.setObjectName("Muted")
         cam_hint.setWordWrap(True)
         root.addWidget(cam_hint)
+        self.auto_update = QCheckBox("Install mod updates automatically")
+        self.auto_update.setToolTip("When Sapphire finds updates (at start and every few hours), it installs them "
+                                    "straight away. You can still roll any of them back.")
+        self.auto_update.setChecked(manager.lib.settings.auto_update)
+        self.auto_update.toggled.connect(lambda on: self._flag("auto_update", on))
+        root.addWidget(self.auto_update)
+        self.one_skin = QCheckBox("One skin per hero")
+        self.one_skin.setToolTip("Turning a skin on turns that hero's other skins off, so they never fight over "
+                                 "the same model. Skins are matched to heroes by the models they replace.")
+        self.one_skin.setChecked(manager.lib.settings.one_skin_per_hero)
+        self.one_skin.toggled.connect(lambda on: self._flag("one_skin_per_hero", on))
+        root.addWidget(self.one_skin)
+        self.helper_box = QCheckBox("Keep mods working after game updates, even when Sapphire is closed")
+        self.helper_box.setToolTip("Starts a tiny background helper when you log in. When a Deadlock update "
+                                   "resets gameinfo.gi, it puts the mod folders back, so launching from Steam "
+                                   "still loads your mods.")
+        self.helper_box.setChecked(manager.lib.settings.helper)
+        self.helper_box.toggled.connect(self._helper_toggled)
+        root.addWidget(self.helper_box)
 
         root.addWidget(_section("Appearance"))
         ap = QHBoxLayout()
@@ -473,6 +531,16 @@ class SettingsPage(QWidget):
         else:
             error(self, "Not found", "Couldn't find Deadlock in any Steam library (native, Flatpak or Snap). "
                   "Use Choose… to point at it.")
+
+    helper_changed = Signal(bool)
+
+    def _flag(self, name, on):
+        setattr(self.mgr.lib.settings, name, on)
+        self.mgr.lib.save()
+
+    def _helper_toggled(self, on):
+        self._flag("helper", on)
+        self.helper_changed.emit(on)
 
     def _fix_camera(self, on):
         self.mgr.lib.settings.fix_camera = on

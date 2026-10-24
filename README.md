@@ -64,6 +64,15 @@ To uninstall: `./uninstall.sh` (keeps your mod library) or `./uninstall.sh --pur
 - **Discord**: optional Rich Presence (Settings → Discord). It needs a Discord
   Application ID, which anyone can create for free at
   discord.com/developers/applications; one ID can be shared.
+- **Sound previews, favourites, collections**: ▶ Preview on sound mods, ☆ to save
+  a mod for later ("Only my favourites" lists them), and paste a GameBanana
+  collection link to install its mods in one go.
+- **Share profiles**: Profiles → "Share as a file…" / "Import a profile file…".
+  Importing downloads whatever GameBanana mods are missing.
+- **Roll back**: every update keeps the previous version; "Roll back" swaps it in.
+- **Settings → Behaviour**: install updates automatically, one skin per hero, and
+  a background helper that keeps mods loading after game updates while Sapphire
+  is closed (an XDG autostart entry, `~/.config/autostart/sapphire-helper.desktop`).
 - **Camera fix for older skins** (on by default, Settings → Behaviour): a Deadlock
   update turned every hero's camera attachments by 120°, so skins compiled before
   it put the first-person camera in the wrong spot. On apply, Sapphire converts

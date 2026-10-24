@@ -1,6 +1,14 @@
 import sys
 
-from sapphire.ui.app import main
+
+def _main() -> int:
+    if "--helper" in sys.argv[1:]:
+        # Headless: no Qt, so the login helper stays tiny.
+        from sapphire import helper
+        return helper.run()
+    from sapphire.ui.app import main
+    return main()
+
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_main())

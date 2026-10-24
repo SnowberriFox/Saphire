@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, QUrl, Signal
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMenu, QPushButton, QScrollArea, QSizePolicy,
@@ -475,6 +475,40 @@ class DetailPanel(QScrollArea):
             ident.clicked.connect(lambda: self.page.identify_requested.emit([mod.uid]))
             row.addWidget(ident)
         self.lay.addLayout(row)
+        if (mod.model == "Sound" and mod.gb_id and not mod.audio_url
+                and mod.uid not in self.page._audio_checked):
+            # Installed before Sapphire kept preview links: look it up once.
+            self.page._audio_checked.add(mod.uid)
+            from sapphire.ui.workers import run
+
+            def got(details, uid=mod.uid):
+                m = self.page.mgr.lib.mods.get(uid)
+                if m and details.submission.audio_url:
+                    m.audio_url = details.submission.audio_url
+                    self.page.mgr.lib.save()
+                    if self.uid == uid:
+                        self.show_mod(uid)
+            run(self.page.mgr.gb.details, mod.model, mod.gb_id, on_done=got, on_error=lambda e: None)
+        extra = QHBoxLayout()
+        if mod.audio_url and self.page.player is not None:
+            from sapphire.ui.audio import PreviewButton
+            extra.addWidget(PreviewButton(self.page.player, mod.audio_url))
+        if self.page.mgr.can_roll_back(mod.uid):
+            prev = mod.previous or {}
+            back = QPushButton("Roll back")
+            back.setToolTip(f"Go back to {prev.get('file_name') or 'the previous version'} "
+                            f"({fmt_date(int(prev.get('file_date') or 0))}). The current version is kept, "
+                            "so you can roll forward again.")
+            back.clicked.connect(lambda: self.page.rollback_requested.emit(mod.uid))
+            extra.addWidget(back)
+        if extra.count():
+            extra.addStretch(1)
+            self.lay.addLayout(extra)
+        if mod.skip_file_id and mod.update and mod.update.file_id == mod.skip_file_id:
+            sk = QLabel("You rolled back from the newest file, so automatic updates leave this mod alone.")
+            sk.setObjectName("Muted")
+            sk.setWordWrap(True)
+            self.lay.addWidget(sk)
         if mod.update:
             u = QLabel(f"New file: {mod.update.file_name} ({fmt_date(mod.update.date)})")
             u.setObjectName("Muted")
@@ -506,6 +540,29 @@ class DetailPanel(QScrollArea):
                              "usually separate files) so you can switch to another one")
             fetch.clicked.connect(lambda: self.page.refetch_requested.emit(mod.uid))
             self.lay.addWidget(fetch, 0, Qt.AlignLeft)
+
+        hero = self.page.mgr.hero_of(mod)
+        if hero:
+            others = [m for m in self.page.mgr.skins_for(hero) if m.uid != mod.uid]
+            if others:
+                h = QLabel("Other skins for this hero")
+                h.setObjectName("SideTitle")
+                self.lay.addWidget(h)
+                for o in others[:8]:
+                    r = QHBoxLayout()
+                    lbl = QLabel(("● " if o.enabled else "○ ") + o.name)
+                    if o.enabled:
+                        lbl.setStyleSheet("background: transparent;")
+                    else:
+                        lbl.setObjectName("Muted")
+                    lbl.setToolTip("On" if o.enabled else "Off")
+                    lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+                    r.addWidget(lbl, 1)
+                    use = QPushButton("Use this one")
+                    use.setToolTip(f"Turn {o.name} on and the other skins for this hero off")
+                    use.clicked.connect(lambda _c=False, u=o.uid: self.page.use_skin(u))
+                    r.addWidget(use)
+                    self.lay.addLayout(r)
 
         cam = self.page.mgr.camera_report.get(mod.uid) if mod.enabled else None
         if cam:
@@ -587,6 +644,7 @@ class InstalledPage(QWidget):
     identify_requested = Signal(object)   # list of uids, or None for all unknown
     reapply_requested = Signal()
     refetch_requested = Signal(str)   # uid
+    rollback_requested = Signal(str)  # uid
     removed = Signal(str)
     status = Signal(str)
 
@@ -594,6 +652,8 @@ class InstalledPage(QWidget):
         super().__init__()
         self.mgr = manager
         self.busy = lambda uid: False   # MainWindow replaces this: is a download running for the mod?
+        self.player = None              # shared sound-preview player, set by MainWindow
+        self._audio_checked: set[str] = set()
         self.images = images
         self.conflicts: dict[str, ModConflicts] = {}
         self.rank: dict[str, int] = {}
@@ -802,11 +862,29 @@ class InstalledPage(QWidget):
         mod = self.mgr.lib.mods.get(uid)
         enabled = item.checkState() == Qt.Checked
         if mod and mod.enabled != enabled:
-            self.mgr.set_enabled(uid, enabled)
+            off = self.mgr.set_enabled(uid, enabled)
+            if off:
+                # one skin per hero switched others off: refresh their boxes
+                QTimer.singleShot(0, self.reload)
+                self.status.emit(f"Turned off {', '.join(m.name for m in off)} (one skin per hero).")
             self._recount()
             if self.detail.uid == uid:
                 self.detail.show_mod(uid)
             self.changed.emit()
+
+    def use_skin(self, uid: str):
+        """Turn this skin on and the hero's other skins off, whatever the setting says."""
+        mod = self.mgr.lib.mods.get(uid)
+        hero = self.mgr.hero_of(mod) if mod else None
+        if not hero:
+            return
+        for m in self.mgr.skins_for(hero):
+            m.enabled = m.uid == uid
+        self.mgr.lib.save()
+        self.mgr._dirty = True
+        self.reload()
+        self.status.emit(f"Using {mod.name} for this hero.")
+        self.changed.emit()
 
     def toggle(self, uid):
         for i in range(self.list.count()):
@@ -817,11 +895,20 @@ class InstalledPage(QWidget):
 
     def set_all(self, on: bool):
         self._building = True
+        heroes_on: set[str] = set()
+        one = on and self.mgr.lib.settings.one_skin_per_hero
         for i in range(self.list.count()):
             item = self.list.item(i)
             if not item.isHidden():
-                item.setCheckState(Qt.Checked if on else Qt.Unchecked)
-                self.mgr.lib.mods[item.data(ROLE_UID)].enabled = on
+                mod = self.mgr.lib.mods[item.data(ROLE_UID)]
+                want = on
+                if one:
+                    hero = self.mgr.hero_of(mod)
+                    if hero:
+                        want = hero not in heroes_on   # first (highest) skin per hero wins
+                        heroes_on.add(hero)
+                item.setCheckState(Qt.Checked if want else Qt.Unchecked)
+                mod.enabled = want
         self._building = False
         self.mgr.lib.save()
         self.mgr._dirty = True
@@ -884,6 +971,8 @@ class InstalledPage(QWidget):
             menu.addAction("Update", lambda: self.update_requested.emit(uid))
         if mod.url:
             menu.addAction("Open on GameBanana", lambda: QDesktopServices.openUrl(QUrl(mod.url)))
+        if self.mgr.can_roll_back(uid):
+            menu.addAction("Roll back to the previous version", lambda: self.rollback_requested.emit(uid))
         menu.addAction("Rename…", lambda: self.rename(uid))
         menu.addAction("Uninstall…", lambda: self.remove(uid))
         menu.exec(self.list.viewport().mapToGlobal(pos))

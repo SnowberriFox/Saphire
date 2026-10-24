@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 import shutil
@@ -17,6 +18,8 @@ from sapphire import (archive, camera_fix, conflicts, deploy, gameinfo, identify
                       steam)
 from sapphire.gamebanana import (Cancelled, GameBananaClient, GameBananaError, GBFile, newer_version,
                                  newest_file)
+from dataclasses import asdict
+
 from sapphire.library import InstalledMod, Library, Profile, StoredFile, StoredVpk, UpdateInfo
 from sapphire.vpk import VpkSet, chunk_index, find_sets
 from sapphire.vpk import write_vpk as vpk_write
@@ -96,12 +99,18 @@ class Manager:
         return self._dirty
 
     # ------------------------------------------------------------------ storage
-    def _store(self, uid: str, sets: list[VpkSet], active: list[VpkSet] | None = None) -> list[StoredVpk]:
-        """Copy every set into the library; `active` (default: all) are the ones that get deployed."""
+    @staticmethod
+    def previous_dir(uid: str) -> Path:
+        return paths.library_dir() / f".{uid}.prev"
+
+    def _store(self, uid: str, sets: list[VpkSet], active: list[VpkSet] | None = None,
+               keep_previous: bool = False) -> list[StoredVpk]:
+        """Copy every set into the library; `active` (default: all) are the ones that get deployed.
+        `keep_previous` parks the files being replaced in .<uid>.prev for roll back."""
         lib = paths.library_dir()
         final = lib / uid
         staging = lib / f".{uid}.new"
-        old = lib / f".{uid}.old"
+        old = self.previous_dir(uid) if keep_previous else lib / f".{uid}.old"
         shutil.rmtree(staging, ignore_errors=True)
         shutil.rmtree(old, ignore_errors=True)
         staging.mkdir(parents=True)
@@ -117,7 +126,8 @@ class Manager:
         if final.exists():
             final.rename(old)
         staging.rename(final)
-        shutil.rmtree(old, ignore_errors=True)
+        if not keep_previous:
+            shutil.rmtree(old, ignore_errors=True)
         return stored
 
     def _pick_sets(self, extracted: Path, name: str, choose: Chooser | None,
@@ -150,7 +160,7 @@ class Manager:
     def install_gamebanana(self, model: str, gb_id: int, file: GBFile | None = None,
                            choose: Chooser | None = None, progress: Progress | None = None,
                            cancel: threading.Event | None = None, add: bool = False,
-                           into: str | None = None) -> InstalledMod:
+                           into: str | None = None, enabled: bool | None = None) -> InstalledMod:
         """Install one of a mod's files. By default it replaces the mod's main entry;
         `add=True` keeps what's there and installs the file as an extra entry beside it
         (for optional add-on files); `into` reinstalls a specific existing entry."""
@@ -184,7 +194,15 @@ class Manager:
             previous = [v.label for v in existing.active_vpks] if existing else None
             sets, chosen = self._pick_sets(extracted, sub.name, choose, previous)
             with self.lock:
-                stored = self._store(uid, sets, chosen)
+                # A different file replacing what's there (an update, another variant):
+                # keep the old one so it can be rolled back.
+                keep = bool(existing and existing.vpks and existing.file_id and existing.file_id != file.id)
+                prior = None
+                if keep:
+                    prior = {"file_id": existing.file_id, "file_name": existing.file_name,
+                             "file_date": existing.file_date, "updated_at": existing.updated_at,
+                             "vpks": [asdict(v) for v in existing.vpks]}
+                stored = self._store(uid, sets, chosen, keep_previous=keep)
                 now = int(time.time())
                 if existing and existing.name:
                     name = existing.name
@@ -198,11 +216,15 @@ class Manager:
                     author=sub.author, category=sub.category_label, thumb_url=sub.thumb_url,
                     nsfw=sub.nsfw, file_id=file.id, file_name=file.filename,
                     file_date=file.date_added, vpks=stored,
-                    enabled=existing.enabled if existing else True,
+                    enabled=existing.enabled if existing else (True if enabled is None else enabled),
                     installed_at=existing.installed_at if existing else now, updated_at=now,
+                    audio_url=sub.audio_url,
+                    previous=prior if keep else (existing.previous if existing else None),
                 )
                 self.lib.add(mod, top=True)
                 self.lib.mods[uid] = mod
+                if mod.enabled and not existing:
+                    self._one_skin_per_hero(uid)
                 self.lib.save()
                 self._dirty = True
             log.info("installed %s (%s) file %s", sub.name, uid, file.filename)
@@ -311,8 +333,76 @@ class Manager:
             mod = self.lib.remove(uid)
             if mod:
                 shutil.rmtree(mod.folder, ignore_errors=True)
+                shutil.rmtree(self.previous_dir(uid), ignore_errors=True)
             self.lib.save()
             self._dirty = True
+
+    # ---------------------------------------------------------------- roll back
+    def can_roll_back(self, uid: str) -> bool:
+        mod = self.lib.mods.get(uid)
+        return bool(mod and mod.previous and self.previous_dir(uid).is_dir())
+
+    def roll_back(self, uid: str) -> InstalledMod:
+        """Swap a mod back to the version it had before its last update (and keep the
+        newer one, so rolling back again undoes the roll back)."""
+        with self.lock:
+            mod = self.lib.mods.get(uid)
+            if not mod or not self.can_roll_back(uid):
+                raise ManagerError("There's no earlier version of this mod to go back to.")
+            lib = paths.library_dir()
+            cur, prev, tmp = mod.folder, self.previous_dir(uid), lib / f".{uid}.swap"
+            shutil.rmtree(tmp, ignore_errors=True)
+            cur.rename(tmp)
+            prev.rename(cur)
+            tmp.rename(prev)
+            p = mod.previous
+            newer = {"file_id": mod.file_id, "file_name": mod.file_name, "file_date": mod.file_date,
+                     "updated_at": mod.updated_at, "vpks": [asdict(v) for v in mod.vpks]}
+            mod.vpks = [StoredVpk(label=v.get("label", ""), active=bool(v.get("active", True)),
+                                  files=[StoredFile(**f) for f in v.get("files", [])]) for v in p.get("vpks", [])]
+            mod.file_id, mod.file_name = int(p.get("file_id") or 0), p.get("file_name") or ""
+            mod.file_date, mod.updated_at = int(p.get("file_date") or 0), int(p.get("updated_at") or 0)
+            mod.previous = newer
+            # The newer file is now an update again; leave it to the user, not auto-update.
+            if newer["file_id"] and newer["file_id"] != mod.file_id:
+                mod.update = UpdateInfo(newer["file_id"], newer["file_name"], newer["file_date"])
+                mod.skip_file_id = newer["file_id"]
+            self.lib.save()
+            self._dirty = True
+            log.info("rolled %s back to %s", mod.name, mod.file_name)
+            return mod
+
+    # ----------------------------------------------------------- heroes / skins
+    HERO_RE = re.compile(r"^models/heroes(?:_wip|_staging)?/([a-z0-9_]+?)(?:_v\d+)?/[^/]+\.vmdl_c$")
+
+    def hero_of(self, mod: InstalledMod) -> str | None:
+        """The hero a skin replaces (internal name from its model paths), or None for
+        anything that isn't a single hero's skin."""
+        heroes: set[str] = set()
+        for v in mod.active_vpks:
+            for path in self.vpk_index.entries(mod.file_path(v.main)):
+                m = self.HERO_RE.match(path)
+                if m:
+                    heroes.add(m.group(1))
+        return heroes.pop() if len(heroes) == 1 else None
+
+    def skins_for(self, hero: str) -> list[InstalledMod]:
+        return [m for m in self.lib.ordered() if self.hero_of(m) == hero]
+
+    def _one_skin_per_hero(self, uid: str) -> list[InstalledMod]:
+        """With the setting on, switch off the other enabled skins for this mod's hero."""
+        if not self.lib.settings.one_skin_per_hero:
+            return []
+        mod = self.lib.mods.get(uid)
+        hero = self.hero_of(mod) if mod else None
+        if not hero:
+            return []
+        off = [m for m in self.skins_for(hero) if m.uid != uid and m.enabled]
+        for m in off:
+            m.enabled = False
+        if off:
+            log.info("one skin per hero (%s): turned off %s", hero, ", ".join(m.name for m in off))
+        return off
 
     def rename(self, uid: str, name: str) -> None:
         with self.lock:
@@ -320,12 +410,17 @@ class Manager:
                 self.lib.mods[uid].name = name.strip()
                 self.lib.save()
 
-    def set_enabled(self, uid: str, enabled: bool) -> None:
+    def set_enabled(self, uid: str, enabled: bool) -> list[InstalledMod]:
+        """Returns other mods turned off because of the one-skin-per-hero rule."""
         with self.lock:
+            off: list[InstalledMod] = []
             if uid in self.lib.mods:
                 self.lib.mods[uid].enabled = enabled
+                if enabled:
+                    off = self._one_skin_per_hero(uid)
                 self.lib.save()
                 self._dirty = True
+            return off
 
     def set_variants(self, uid: str, active_labels: list[str]) -> None:
         """Choose which of a mod's stored VPKs are deployed (at least one)."""
@@ -532,6 +627,10 @@ class Manager:
             self.lib.save()
         return found
 
+    def auto_update_targets(self, found: list[InstalledMod]) -> list[InstalledMod]:
+        """Mods auto-update may install: not ones the user rolled back from that file."""
+        return [m for m in found if m.update and m.update.file_id != m.skip_file_id]
+
     def update(self, uid: str, choose: Chooser | None = None, progress: Progress | None = None,
                cancel: threading.Event | None = None) -> InstalledMod:
         mod = self.lib.mods[uid]
@@ -544,6 +643,7 @@ class Manager:
             raise ManagerError("No files available for this mod anymore.")
         new = self.install_gamebanana(mod.model, mod.gb_id, target, choose, progress, cancel, into=uid)
         new.update = None
+        new.skip_file_id = 0
         with self.lock:
             self.lib.save()
         return new
@@ -551,6 +651,125 @@ class Manager:
     # --------------------------------------------------------------- conflicts
     def conflicts(self) -> dict[str, conflicts.ModConflicts]:
         return conflicts.compute(self.lib.ordered(), self.vpk_index)
+
+    # --------------------------------------------------------- shared profiles
+    SHARE_FORMAT = "sapphire-profile"
+
+    def export_profile(self, name: str, dest: Path | str) -> int:
+        """Write a profile to a file someone else can import. Returns the mod count."""
+        from sapphire import __version__
+        prof = self.lib.profiles.get(name)
+        if prof is None:
+            raise ManagerError(f"No profile called “{name}”.")
+        mods = []
+        for uid, enabled in prof.entries:
+            m = self.lib.mods.get(uid)
+            if m is None:
+                continue
+            entry = {"name": m.name, "enabled": bool(enabled), "source": m.source,
+                     "parts": [v.label for v in m.active_vpks]}
+            if m.source == "gamebanana" and m.gb_id:
+                entry.update(model=m.model, gb_id=m.gb_id, file_id=m.file_id, file_name=m.file_name,
+                             url=m.url, author=m.author, extra=uid != f"gb-{m.model}-{m.gb_id}")
+            else:
+                entry.update(file_name=m.file_name)
+            mods.append(entry)
+        data = {"format": self.SHARE_FORMAT, "version": 1, "name": prof.name,
+                "exported_at": int(time.time()), "sapphire": __version__, "mods": mods}
+        dest = Path(dest)
+        tmp = dest.with_name(dest.name + ".tmp")
+        tmp.write_text(json.dumps(data, indent=1, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(dest)
+        return len(mods)
+
+    @classmethod
+    def read_shared_profile(cls, path: Path | str) -> dict:
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ManagerError(f"That file couldn't be read ({exc.__class__.__name__}).") from exc
+        if not isinstance(data, dict) or data.get("format") != cls.SHARE_FORMAT or not isinstance(data.get("mods"), list):
+            raise ManagerError("That isn't a Sapphire profile file.")
+        clean = []
+        for e in data["mods"][:500]:
+            if not isinstance(e, dict) or not isinstance(e.get("name"), str):
+                continue
+            item = {"name": e["name"][:200], "enabled": bool(e.get("enabled", True)),
+                    "source": "gamebanana" if e.get("source") == "gamebanana" else "local",
+                    "parts": [p for p in e.get("parts") or [] if isinstance(p, str)][:50],
+                    "file_name": str(e.get("file_name") or "")[:300], "extra": bool(e.get("extra"))}
+            if item["source"] == "gamebanana":
+                try:
+                    item.update(model="Sound" if e.get("model") == "Sound" else "Mod",
+                                gb_id=int(e.get("gb_id") or 0), file_id=int(e.get("file_id") or 0))
+                except (TypeError, ValueError):
+                    continue
+                if not item["gb_id"]:
+                    continue
+            clean.append(item)
+        name = str(data.get("name") or "Shared profile").strip()[:80] or "Shared profile"
+        return {"name": name, "mods": clean}
+
+    def match_shared(self, entry: dict) -> InstalledMod | None:
+        """The installed mod a shared entry refers to, if any."""
+        if entry["source"] != "gamebanana":
+            return next((m for m in self.lib.ordered()
+                         if m.source == "local" and m.file_name and m.file_name == entry["file_name"]), None)
+        exact = self.lib.by_gb_file(entry["model"], entry["gb_id"], entry["file_id"])
+        if exact is not None:
+            return exact
+        if entry.get("extra"):
+            return None
+        return self.lib.mods.get(f"gb-{entry['model']}-{entry['gb_id']}")
+
+    def import_shared_profile(self, shared: dict, name: str, choose: Chooser | None = None,
+                              progress: Progress | None = None,
+                              cancel: threading.Event | None = None) -> dict:
+        """Install what a shared profile needs and save it as profile `name`.
+        Returns {"downloaded": n, "failed": [names], "missing": [names]}."""
+        downloaded, failed, missing = 0, [], []
+        entries: list[tuple[str, bool]] = []
+        todo = shared["mods"]
+        for i, e in enumerate(todo):
+            if cancel is not None and cancel.is_set():
+                raise Cancelled()
+            mod = self.match_shared(e)
+            if mod is None and e["source"] == "gamebanana":
+                if progress:
+                    progress(f"Getting {e['name']} ({i + 1}/{len(todo)})", 0, 0)
+                wanted = {p.lower() for p in e["parts"]}
+
+                def pick(sets, mod_name, _w=wanted, _c=choose):
+                    hit = [x for x in sets if x.rel.lower() in _w]
+                    if hit:
+                        return hit
+                    return _c(sets, mod_name) if _c else sets
+
+                try:
+                    files = self.gb.files(e["model"], e["gb_id"])
+                    target = next((f for f in files if f.id == e["file_id"]), None) or newest_file(files)
+                    if target is None:
+                        raise ManagerError("no files left on GameBanana")
+                    # Off for now: it belongs to the imported profile, not the current setup.
+                    mod = self.install_gamebanana(e["model"], e["gb_id"], target, choose=pick,
+                                                  progress=progress, cancel=cancel, add=e.get("extra", False),
+                                                  enabled=False)
+                    downloaded += 1
+                except Cancelled:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - carry on with the rest
+                    log.warning("shared profile: %s failed: %s", e["name"], exc)
+                    failed.append(e["name"])
+                    continue
+            if mod is None:
+                missing.append(e["name"])
+                continue
+            entries.append((mod.uid, e["enabled"]))
+        with self.lock:
+            self.lib.profiles[name] = Profile(name=name, entries=entries, saved_at=int(time.time()),
+                                              origin="shared")
+            self.lib.save()
+        return {"downloaded": downloaded, "failed": failed, "missing": missing}
 
     # ---------------------------------------------------------------- profiles
     def save_profile(self, name: str) -> None:

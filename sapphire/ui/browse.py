@@ -126,6 +126,7 @@ class CardDelegate(QStyledItemDelegate):
         self.view = view
         self.images = images
         self.installed_fn = installed_fn  # sub -> "installed" | "update" | None
+        self.fav_fn = lambda sub: False   # BrowsePage replaces: is this a favourite?
         self.card_size = QSize(theme.px(232), theme.px(210))
         self.mode = "grid"   # or "list"
 
@@ -225,6 +226,8 @@ class CardDelegate(QStyledItemDelegate):
             ("Installed", theme.OK_BG, theme.VERDIGRIS) if state == "installed" else (None, None, None),
             ("18+", theme.OXBLOOD, "#FFF2EE") if sub.nsfw else (None, None, None),
             ("Outdated", theme.RAISED, theme.MUTED) if sub.obsolete else (None, None, None),
+            ("★", theme.ACCENT_LO, theme.ACCENT_HI) if self.fav_fn(sub) else (None, None, None),
+            ("♪ preview", theme.RAISED, theme.TEXT) if sub.audio_url else (None, None, None),
         ):
             if not text:
                 continue
@@ -426,6 +429,9 @@ class DetailPane(QScrollArea):
         self.details: Details | None = None
         self.image_index = 0
         self._token = 0
+        self.player = None                      # shared PreviewPlayer, set by the window
+        self.is_fav = lambda sub: False          # set by BrowsePage
+        self.toggle_fav = lambda sub: False
         images.loaded.connect(self._image_loaded)
         self.show_empty()
 
@@ -545,9 +551,23 @@ class DetailPane(QScrollArea):
         meta.setObjectName("Muted")
         meta.setWordWrap(True)
         self.lay.addWidget(meta)
+        actions = QHBoxLayout()
         open_btn = QPushButton("Open on GameBanana")
         open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(sub.url or f"https://gamebanana.com/mods/{sub.id}")))
-        self.lay.addWidget(open_btn)
+        fav = self.is_fav(sub)
+        star = QPushButton("★  Favourite" if fav else "☆  Favourite")
+        star.setToolTip("Remove from favourites" if fav else "Save it to Favourites to find again later")
+        if fav:
+            star.setProperty("kind", "primary")
+        star.clicked.connect(lambda: (self.toggle_fav(sub), self._render()))
+        actions.addWidget(star)
+        actions.addWidget(open_btn, 1)
+        self.lay.addLayout(actions)
+        if sub.audio_url and self.player is not None:
+            from sapphire.ui.audio import PreviewButton
+            prev = PreviewButton(self.player, sub.audio_url)
+            prev.setProperty("kind", "primary")
+            self.lay.addWidget(prev)
 
         # files
         head = QLabel("Files")
@@ -693,7 +713,10 @@ class FilterPanel(QWidget):
         self.hide_installed.setChecked(settings.hide_installed)
         self.hide_obsolete = QCheckBox("Hide outdated mods")
         self.hide_obsolete.setChecked(settings.hide_obsolete)
-        for cb in (self.hide_nsfw, self.hide_installed, self.hide_obsolete):
+        self.favourites_only = QCheckBox("Only my favourites ★")
+        self.favourites_only.setToolTip("Show the mods you starred (works offline)")
+        self.favourites_only.setChecked(settings.favourites_only)
+        for cb in (self.favourites_only, self.hide_nsfw, self.hide_installed, self.hide_obsolete):
             cb.toggled.connect(self.changed)
             lay.addWidget(cb)
 
@@ -702,7 +725,8 @@ class FilterPanel(QWidget):
         lay.addWidget(link_title)
         link_row = QHBoxLayout()
         self.link = QLineEdit()
-        self.link.setPlaceholderText("gamebanana.com/mods/…")
+        self.link.setPlaceholderText("A mod or collection link")
+        self.link.setToolTip("Paste a GameBanana mod, sound or collection link")
         go = QPushButton("Install")
         go.clicked.connect(self._link)
         self.link.returnPressed.connect(self._link)
@@ -846,6 +870,9 @@ class BrowsePage(QWidget):
         root.addWidget(center, 1)
 
         self.detail = DetailPane(self.client, images, lambda m, i: self.mgr.lib.by_gb_all(m, i))
+        self.detail.is_fav = lambda sub: self.mgr.lib.is_favourite(sub.model, sub.id)
+        self.detail.toggle_fav = self._toggle_fav
+        self.delegate.fav_fn = self.detail.is_fav
         self.detail.install_requested.connect(self.install_requested)
         self.detail.author_clicked.connect(self.filter_author)
         root.addWidget(self.detail)
@@ -868,6 +895,15 @@ class BrowsePage(QWidget):
         if not mod:
             return None
         return "update" if mod.update else "installed"
+
+    def _toggle_fav(self, sub) -> bool:
+        on = self.mgr.lib.toggle_favourite(sub)
+        self.mgr.lib.save()
+        self.status.emit(f"Added {sub.name} to favourites." if on else f"Removed {sub.name} from favourites.")
+        self.grid.viewport().update()
+        if not on and self.filters.favourites_only.isChecked():
+            self.reload()
+        return on
 
     def _view_changed(self, mode: str):
         self.mgr.lib.settings.view_mode = mode
@@ -904,6 +940,7 @@ class BrowsePage(QWidget):
         s.hide_nsfw = self.filters.hide_nsfw.isChecked()
         s.hide_installed = self.filters.hide_installed.isChecked()
         s.hide_obsolete = self.filters.hide_obsolete.isChecked()
+        s.favourites_only = self.filters.favourites_only.isChecked()
         self.mgr.lib.save()
         if self._cats_loaded_for != self.filters.model:
             self._load_categories()
@@ -941,13 +978,24 @@ class BrowsePage(QWidget):
         token = self._token
         page = self._page + 1
         cat = self.filters.category_id
+        if self.filters.favourites_only.isChecked():
+            # Favourites come from the library, not GameBanana: filter them here.
+            from sapphire.gamebanana import Page
+            text = self.filters.search.text().strip().lower()
+            subs = [x for x in self.mgr.lib.favourite_submissions() if x.model == self.filters.model
+                    and (not text or text in x.name.lower() or text in x.author.lower())]
+            if self.submitter:
+                subs = [x for x in subs if x.author_id == self.submitter[0]]
+            QTimer.singleShot(0, lambda t=token, n=len(subs): self._got_page(
+                Page(items=subs, total=n, complete=True, page=1), t, favourites=True))
+            return
         run(self.client.browse, self.filters.model, page, self.per_page,
             self.filters.search.text(), cat, self.filters.sort.currentData(),
             self.submitter[0] if self.submitter else None,
             on_done=lambda pg, t=token: self._got_page(pg, t),
             on_error=lambda e, t=token: self._page_failed(e, t))
 
-    def _got_page(self, page, token):
+    def _got_page(self, page, token, favourites: bool = False):
         if token != self._token:
             return
         self._loading = False
@@ -973,12 +1021,15 @@ class BrowsePage(QWidget):
         noun = "sounds" if self.filters.model == "Sound" else "mods"
         if self._shown == 0 and self._complete:
             self.grid.hide()
-            self.message_label.setText(f"No {noun} match these filters. Try a broader search or another category.")
+            self.message_label.setText(
+                f"No favourite {noun} yet. Open one and press ☆ Favourite to keep it here." if favourites else
+                f"No {noun} match these filters. Try a broader search or another category.")
             self.retry.hide()
             self.message.show()
             self.result_label.setText("")
             return
-        self.result_label.setText(f"{page.total:,} {noun} on GameBanana")
+        self.result_label.setText(f"{page.total:,} favourite {noun}" if favourites
+                                  else f"{page.total:,} {noun} on GameBanana")
         # Keep pulling pages until the view can scroll (filters may hide a lot).
         QTimer.singleShot(0, self._maybe_fill)
 
@@ -1005,10 +1056,17 @@ class BrowsePage(QWidget):
         if sub:
             self.detail.show_sub(sub)
 
+    collection_requested = Signal(int)
+
     def _install_link(self, text: str):
+        from sapphire.gamebanana import parse_collection_url
+        cid = parse_collection_url(text)
+        if cid:
+            self.collection_requested.emit(cid)
+            return
         parsed = parse_url(text)
         if not parsed:
-            self.status.emit("That doesn't look like a GameBanana mod link.")
+            self.status.emit("That doesn't look like a GameBanana mod, sound or collection link.")
             return
         model, mid = parsed
         self.install_requested.emit(model, mid, None, False)

@@ -21,7 +21,8 @@ from sapphire.core import GameRunning, Manager, NoGame
 from sapphire.gamebanana import Cancelled
 from sapphire.ui import theme
 from sapphire.ui.browse import BrowsePage
-from sapphire.ui.dialogs import choose_file, choose_variants, confirm, error
+from sapphire.ui.audio import PreviewPlayer
+from sapphire.ui.dialogs import ask_text, choose_file, choose_variants, confirm, error
 from sapphire.ui.downloads import DownloadsPage, Job, JobList
 from sapphire.ui.images import ImageCache
 from sapphire.ui.importing import ImportDialog
@@ -136,6 +137,14 @@ class MainWindow(QMainWindow):
         self.settings.discord_changed.connect(self.update_presence)
         self.installed.reapply_requested.connect(self.reapply)
         self.installed.refetch_requested.connect(self.refetch_mod)
+        self.installed.rollback_requested.connect(self.roll_back)
+        self.installed.status.connect(self.say)
+        self.browse.collection_requested.connect(self.open_collection)
+        self.profiles.import_requested.connect(self.import_profile_file)
+        self.settings.helper_changed.connect(self.set_helper)
+        self.player = PreviewPlayer(manager.gb.session)
+        self.browse.detail.player = self.player
+        self.installed.player = self.player
 
         self._apply_timer = QTimer(self, singleShot=True, interval=600)
         self._apply_timer.timeout.connect(self.apply_now)
@@ -320,6 +329,15 @@ class MainWindow(QMainWindow):
 
     # -------------------------------------------------------------- start-up
     def _startup(self):
+        if self.mgr.lib.settings.helper:
+            from sapphire import helper
+            try:
+                if not helper.is_enabled():
+                    helper.enable(start_now=False)   # e.g. after a reinstall
+                if not helper.helper_running():
+                    helper.start()
+            except OSError as exc:
+                log.warning("helper: %s", exc)
         if not self.mgr.lib.settings.onboarded:
             self.run_setup(first=True)
             return
@@ -528,14 +546,15 @@ class MainWindow(QMainWindow):
         return self.caller.call(choose_variants, self, sets, name)
 
     def _queue(self, label: str, fn, *args, success: str = "", kind: str = "install", silent: bool = False,
-               key: str = ""):
+               key: str = "", after=None):
         # One active job per thing: clicking Update all (or Install) again while it's
         # still queued or running must not line the same download up a second time.
         busy = self.jobs.active_for(key)
         if busy is not None:
             return busy
         job = Job(label, kind=kind, key=key)
-        job.retry = lambda: self._queue(label, fn, *args, success=success, kind=kind, silent=silent, key=key)
+        job.retry = lambda: self._queue(label, fn, *args, success=success, kind=kind, silent=silent, key=key,
+                                        after=after)
         self.jobs.add(job)
 
         def progress(stage, done, total):
@@ -553,6 +572,8 @@ class MainWindow(QMainWindow):
                 self.say(success.format(name=getattr(result, "name", label)))
             self._library_changed()
             self.request_apply()
+            if after is not None:
+                after(result)
 
         def failed(exc):
             if isinstance(exc, Cancelled) or job.cancel.is_set():
@@ -613,6 +634,94 @@ class MainWindow(QMainWindow):
             error(self, "Couldn't list files", str(exc))
 
         run(self.mgr.variant_files, uid, on_done=listed, on_error=failed)
+
+    def roll_back(self, uid: str):
+        mod = self.mgr.lib.mods.get(uid)
+        if not mod or self.jobs.active_for(f"mod:{uid}"):
+            return
+        prev = (mod.previous or {}).get("file_name") or "the previous version"
+        if not confirm(self, "Roll back", f"Switch “{mod.name}” back to {prev}? The current version is kept, "
+                                          "so you can roll forward again from the same button.", "Roll back"):
+            return
+        try:
+            m = self.mgr.roll_back(uid)
+        except Exception as exc:  # noqa: BLE001
+            error(self, "Couldn't roll back", str(exc))
+            return
+        self._library_changed()
+        self.request_apply()
+        self.say(f"Rolled {m.name} back to {m.file_name}.")
+
+    def open_collection(self, cid: int):
+        from sapphire.ui.collection import CollectionDialog
+        dlg = CollectionDialog(self.mgr, cid, self.images, self)
+        if dlg.exec():
+            subs = dlg.chosen()
+            for sub in subs:
+                self.install_gb(sub.model, sub.id)
+            if subs:
+                self.say(f"Installing {len(subs)} mod{'s' if len(subs) != 1 else ''} from the collection. "
+                         "See Downloads.", 12000)
+
+    def import_profile_file(self, path):
+        try:
+            shared = self.mgr.read_shared_profile(path)
+        except Exception as exc:  # noqa: BLE001
+            error(self, "Couldn't open that profile", str(exc))
+            return
+        have = sum(1 for e in shared["mods"] if self.mgr.match_shared(e) is not None)
+        local = [e["name"] for e in shared["mods"] if e["source"] != "gamebanana" and self.mgr.match_shared(e) is None]
+        download = len(shared["mods"]) - have - len(local)
+        lines = [f"“{shared['name']}” has {len(shared['mods'])} mod{'s' if len(shared['mods']) != 1 else ''}."]
+        if have:
+            lines.append(f"• {have} you already have")
+        if download:
+            lines.append(f"• {download} to download from GameBanana")
+        if local:
+            lines.append(f"• {len(local)} added from files, which can't be downloaded: " + ", ".join(local[:5])
+                         + ("…" if len(local) > 5 else ""))
+        lines.append("\nWhat should the profile be called here?")
+        default = shared["name"]
+        if default in self.mgr.lib.profiles:
+            default = f"{default} (shared)"
+        name = ask_text(self, "Import profile", "\n".join(lines), default)
+        if not name:
+            return
+        if name in self.mgr.lib.profiles and not confirm(
+                self, "Replace profile", f"“{name}” already exists. Replace it?", "Replace"):
+            return
+
+        def do(shared, name, choose=None, progress=None, cancel=None):
+            return self.mgr.import_shared_profile(shared, name, choose=choose, progress=progress, cancel=cancel)
+
+        def after(res):
+            self.profiles.reload()
+            extra = []
+            if res["failed"]:
+                extra.append(f"couldn't download {', '.join(res['failed'][:4])}")
+            if res["missing"]:
+                extra.append(f"{len(res['missing'])} not available")
+            msg = f"Profile “{name}” is ready ({res['downloaded']} downloaded" + \
+                  ("; " + "; ".join(extra) if extra else "") + "). Switch to it now?"
+            if confirm(self, "Profile imported", msg, "Switch now"):
+                self.mgr.load_profile(name)
+                self.profiles.reload()
+                self._profile_switched()
+
+        self._queue(f"Profile: {name}", do, shared, name, silent=True, kind="import",
+                    key=f"profile:{name}", after=after)
+
+    def set_helper(self, on: bool):
+        from sapphire import helper
+        try:
+            if on:
+                helper.enable(start_now=True)
+                self.say("Background helper on: mods keep loading after game updates, even with Sapphire closed.")
+            else:
+                helper.disable()
+                self.say("Background helper off.")
+        except OSError as exc:
+            error(self, "Couldn't change the helper", str(exc))
 
     def update_all(self):
         for mod in [m for m in self.mgr.lib.ordered() if m.update]:
@@ -816,6 +925,13 @@ class MainWindow(QMainWindow):
             self.installed.check_btn.setText("Check for updates")
             self._library_changed()
             n_checked = sum(1 for m in self.mgr.lib.mods.values() if m.source == "gamebanana" and m.gb_id)
+            auto = self.mgr.auto_update_targets(found) if self.mgr.lib.settings.auto_update else []
+            if auto and not manual:
+                for m in auto:
+                    self.update_mod(m.uid)
+                self.say(f"Updating {len(auto)} mod{'s' if len(auto) != 1 else ''} automatically. "
+                         "See Downloads.", 15000)
+                return
             if found:
                 self.say(f"{len(found)} update{'s' if len(found) != 1 else ''} available. See Installed.", 15000)
             elif manual:
@@ -888,6 +1004,8 @@ def main(argv=None) -> int:
     log.info("Sapphire %s starting", __version__)
     QApplication.setApplicationName(APP_NAME)
     QApplication.setDesktopFileName(APP_ID)
+    from sapphire import helper
+    _gui_lock = helper.hold_gui_lock()  # noqa: F841 - held for the process lifetime; the helper backs off
     app = QApplication(argv)
     manager = Manager()
     st = manager.lib.settings
