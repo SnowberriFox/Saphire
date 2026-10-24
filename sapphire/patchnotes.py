@@ -12,6 +12,7 @@ from pathlib import Path
 from sapphire import __version__
 from sapphire.updater import parse_version
 
+CHANGELOG_URL = "https://github.com/SnowberriFox/Saphire/blob/main/CHANGELOG.md"
 MODES = {"update": "After an update", "always": "Every time Sapphire opens", "never": "Never"}
 _HEADING = re.compile(r"^## +(\d+\.\d+(?:\.\d+)?)\b.*$", re.M)
 
@@ -45,6 +46,12 @@ def notes_between(text: str, seen: str, current: str = __version__, limit: int =
         return [(h, b) for v, h, b in secs if parse_version(v) == cur][:1]
     old = parse_version(seen)
     return [(h, b) for v, h, b in secs if old < parse_version(v) <= cur][:limit]
+
+
+def earlier(text: str, before: str, limit: int = 6) -> list[tuple[str, str]]:
+    """(heading, body) for up to `limit` versions older than `before`, newest first."""
+    top = parse_version(before)
+    return [(h, b) for v, h, b in sections(text) if parse_version(v) < top][:limit]
 
 
 def should_show(mode: str, seen: str, fresh_install: bool = False, current: str = __version__) -> bool:

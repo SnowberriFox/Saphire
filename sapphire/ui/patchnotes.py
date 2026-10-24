@@ -13,7 +13,8 @@ class PatchNotesDialog(QDialog):
     def __init__(self, parent, manager, seen: str = ""):
         super().__init__(parent)
         self.mgr = manager
-        notes = patchnotes.notes_between(patchnotes.changelog_text(), seen)
+        text = patchnotes.changelog_text()
+        notes = patchnotes.notes_between(text, seen)
         newer = len(notes) > 1
         self.setWindowTitle(f"What's new in Sapphire {__version__}")
         self.resize(theme.px(640), theme.px(620))
@@ -28,9 +29,14 @@ class PatchNotesDialog(QDialog):
         view = QTextBrowser()
         view.setOpenExternalLinks(True)
         if notes:
-            md = "\n\n".join((f"## {h}\n\n{b}" if newer else b) for h, b in notes)
+            md = "\n\n".join(f"## {h}\n\n{b}" for h, b in notes)
+            oldest_shown = notes[-1][0].split()[0]          # headings start with the version
+            older = patchnotes.earlier(text, oldest_shown, limit=3 if newer else 6)
+            if older:
+                md += "\n\n---\n\n# Earlier versions\n\n" + "\n\n".join(f"## {h}\n\n{b}" for h, b in older)
         else:
-            md = "No patch notes came with this version."
+            md = ("These patch notes are missing from this install. "
+                  f"[Read them on GitHub]({patchnotes.CHANGELOG_URL}).")
         view.document().setDefaultStyleSheet("h2 { margin-top: 18px; } h3 { margin-top: 10px; } "
                                               "li { margin-bottom: 5px; }")
         view.document().setDocumentMargin(theme.px(10))

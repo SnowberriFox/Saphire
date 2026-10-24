@@ -3,6 +3,15 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.7.1 — 2026-10-24
+
+### Fixed
+- **Patch notes were empty after updating** ("No patch notes came with this
+  version"). The in-app updater skips links inside a download for safety, and the
+  notes were shipped as one; they're now a real file. The window now also lists
+  earlier versions below the new ones, and links to GitHub if the notes are ever
+  missing.
+
 ## 1.7.0 — 2026-10-24
 
 ### Added

@@ -193,3 +193,30 @@ def test_packaged_changelog_has_this_version():
     from sapphire import __version__
     text = patchnotes.changelog_text()
     assert any(v == __version__ for v, _, _ in patchnotes.sections(text))
+
+
+def test_packaged_changelog_is_a_real_copy():
+    # The in-app updater skips symlinks when it unpacks a release, so the copy
+    # inside the package must be a real file, identical to the repo's CHANGELOG.md.
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    packaged = root / "sapphire" / "assets" / "CHANGELOG.md"
+    assert not packaged.is_symlink()
+    assert packaged.read_text(encoding="utf-8") == (root / "CHANGELOG.md").read_text(encoding="utf-8"), \
+        "copy CHANGELOG.md to sapphire/assets/CHANGELOG.md"
+
+
+def test_updater_unpack_keeps_patch_notes(tmp_path):
+    # Build a GitHub-style tarball from the working tree and unpack it the way
+    # the updater does: the patch notes must survive.
+    import tarfile
+    from pathlib import Path
+
+    from sapphire.updater import Updater
+    root = Path(__file__).resolve().parents[1]
+    tb = tmp_path / "s.tar.gz"
+    with tarfile.open(tb, "w:gz") as tf:
+        for rel in ("pyproject.toml", "CHANGELOG.md", "sapphire/assets/CHANGELOG.md"):
+            tf.add(root / rel, f"SnowberriFox-Saphire-abc123/{rel}")
+    src = Updater._extract(tb, tmp_path / "src")
+    assert (src / "sapphire/assets/CHANGELOG.md").stat().st_size > 1000
