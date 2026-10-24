@@ -46,6 +46,38 @@ cleanup:
   - /lib/pkgconfig
   - '*.a'
 modules:
+  # Qt's network library (which QtMultimedia, i.e. sound previews, loads) links
+  # against GSSAPI, and the Freedesktop runtime doesn't ship Kerberos.
+  - name: krb5
+    buildsystem: autotools
+    subdir: src
+    config-opts:
+      - --disable-static
+      - --disable-rpath
+      - --disable-nls
+      - --without-ldap
+      - --without-tcl
+      - --without-keyutils
+      - --without-libedit
+      - --without-readline
+      - --without-system-verto
+      - --localstatedir=/var/lib
+    cleanup:
+      - /bin
+      - /sbin
+      - /share/man
+      - /share/examples
+      - /share/et
+      - /lib/krb5/plugins/kdb
+    sources:
+      - type: git
+        url: https://github.com/krb5/krb5.git
+        tag: krb5-1.21.3-final
+        commit: 8f56f544dd179056e9b8d02552e6c5e392eb2966
+      - type: shell
+        commands:
+          - cd src && autoreconf -fi
+
   - python-deps.json
 
   - name: 7zip
