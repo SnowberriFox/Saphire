@@ -38,8 +38,18 @@ jobs:
           msg=$(grep -v '^\s*$' selftest.txt | tail -n 25 | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
           if [ $code -ne 0 ]; then echo "::error title=Self-test failed::$msg"; else echo "::notice title=Self-test passed::$msg"; fi
           exit $code
-      - name: Attach to the release
+      - name: Release notes from CHANGELOG.md
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '$0 ~ "^## "v" " {f=1; next} /^## / {if (f) exit} f' CHANGELOG.md > notes.md
+          printf '\n**Flatpak:** download `Sapphire.flatpak` below, then `flatpak install --user Sapphire.flatpak`. Installs made with `install.sh` update themselves as before.\n' >> notes.md
+          cat notes.md
+      - name: Publish the release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          name: Sapphire ${{ github.ref_name }}
+          body_path: notes.md
           files: Sapphire.flatpak
