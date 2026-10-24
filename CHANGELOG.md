@@ -21,6 +21,9 @@ as "What's new".
   Deadlock is running (it can't see other processes), the background helper's
   login entry goes in your real autostart folder, and updates point you to the
   newest bundle.
+- **`sapphire --selftest`** checks an install works (Qt, sound previews decoding
+  MP3, 7-Zip, the main window) without touching your mods. The Flatpak build
+  runs it inside the sandbox before publishing the bundle.
 
 ### Changed
 - Sapphire now installs PySide6-Essentials and PySide6-Addons instead of the
