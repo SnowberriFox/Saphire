@@ -1,0 +1,27 @@
+name: Flatpak
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  flatpak:
+    name: Build the Flatpak bundle
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-24.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: Sapphire.flatpak
+          manifest-path: packaging/flatpak/io.github.snowberrifox.Sapphire.yml
+          cache-key: flatpak-builder-${{ hashFiles('packaging/flatpak/python-deps.json') }}
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Sapphire.flatpak

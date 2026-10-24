@@ -183,8 +183,36 @@ def find_deadlock(home: Path | None = None) -> Path | None:
 
 # ------------------------------------------------------------------ game process
 
+REGISTRY_CANDIDATES = (".steam/registry.vdf", "snap/steam/common/.steam/registry.vdf",
+                       ".var/app/com.valvesoftware.Steam/.steam/registry.vdf")
+
+
+def steam_running_app(home: Path | None = None) -> str | None:
+    """The app id Steam says is running (registry.vdf's RunningAppID), if any."""
+    home = home or Path.home()
+    for rel in REGISTRY_CANDIDATES:
+        try:
+            data = parse_vdf((home / rel).read_text(encoding="utf-8", errors="replace"))
+        except (OSError, VdfError):
+            continue
+        node = data
+        for key in ("registry", "hkcu", "software", "valve", "steam"):
+            node = next((v for k, v in node.items() if k.lower() == key and isinstance(v, dict)), None) \
+                if isinstance(node, dict) else None
+            if node is None:
+                break
+        if isinstance(node, dict):
+            val = next((v for k, v in node.items() if k.lower() == "runningappid"), None)
+            if isinstance(val, str) and val.strip() not in ("", "0"):
+                return val.strip()
+    return None
+
+
 def is_game_running(proc: Path = Path("/proc")) -> bool:
     """True if Deadlock (deadlock.exe under Proton) is running."""
+    if os.environ.get("FLATPAK_ID"):
+        # A Flatpak can't see the host's processes; ask Steam instead.
+        return steam_running_app() == str(DEADLOCK_APP_ID)
     try:
         entries = list(proc.iterdir())
     except OSError:

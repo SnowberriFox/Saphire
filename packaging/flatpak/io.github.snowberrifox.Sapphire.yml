@@ -1,0 +1,78 @@
+# Flatpak build of Sapphire. Built by .github/workflows/flatpak.yml; to build it
+# yourself:
+#   flatpak install -y flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+#   flatpak-builder --user --install --force-clean build packaging/flatpak/io.github.snowberrifox.Sapphire.yml
+#
+# Python wheels come from python-deps.json (exact URLs + SHA-256, regenerate it
+# with packaging/flatpak/update-deps.sh when dependencies change).
+app-id: io.github.snowberrifox.Sapphire
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: sapphire
+finish-args:
+  # window, sound and GPU
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --socket=pulseaudio
+  # GameBanana, GitHub (updates) and the mod-identification service
+  - --share=network
+  # Steam's own folders (native, Snap and Flatpak Steam) and the usual places for
+  # extra Steam libraries. Sapphire writes only game/citadel/addons* and gameinfo.gi
+  # inside the Deadlock folder.
+  - --filesystem=~/.local/share/Steam
+  - --filesystem=~/.steam
+  - --filesystem=~/snap/steam
+  - --filesystem=~/.var/app/com.valvesoftware.Steam
+  - --filesystem=/run/media
+  - --filesystem=/media
+  - --filesystem=/mnt
+  # "Add a file…" defaults to Downloads; anything else goes through the file portal
+  - --filesystem=xdg-download:ro
+  # importing from Deadlock Mod Manager and Grimoire (read only)
+  - --filesystem=~/.local/share/dev.stormix.deadlock-mod-manager:ro
+  - --filesystem=~/.var/app/dev.stormix.deadlock-mod-manager:ro
+  - --filesystem=~/.config/Grimoire:ro
+  # background helper's login entry (Settings → Behaviour)
+  - --filesystem=~/.config/autostart:create
+  # Discord Rich Presence (off unless switched on in Settings)
+  - --filesystem=xdg-run/discord-ipc-0
+  - --filesystem=xdg-run/app/com.discordapp.Discord:create
+  - --env=QT_QPA_PLATFORM=wayland;xcb
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - '*.a'
+modules:
+  - python-deps.json
+
+  - name: 7zip
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 7zz ${FLATPAK_DEST}/bin/7zz
+      - install -Dm644 License.txt ${FLATPAK_DEST}/share/licenses/7zip/License.txt
+    sources:
+      - type: archive
+        url: https://github.com/ip7z/7zip/releases/download/25.01/7z2501-linux-x64.tar.xz
+        sha256: 4ca3b7c6f2f67866b92622818b58233dc70367be2f36b498eb0bdeaaa44b53f4
+        strip-components: 0
+        only-arches: [x86_64]
+
+  - name: sapphire
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-index --no-deps --no-build-isolation --prefix=${FLATPAK_DEST} .
+      - install -Dm644 packaging/flatpak/io.github.snowberrifox.Sapphire.desktop ${FLATPAK_DEST}/share/applications/io.github.snowberrifox.Sapphire.desktop
+      - install -Dm644 packaging/flatpak/io.github.snowberrifox.Sapphire.metainfo.xml ${FLATPAK_DEST}/share/metainfo/io.github.snowberrifox.Sapphire.metainfo.xml
+      - install -Dm644 sapphire/assets/sapphire.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/io.github.snowberrifox.Sapphire.svg
+      - install -Dm644 sapphire/assets/sapphire-512.png ${FLATPAK_DEST}/share/icons/hicolor/512x512/apps/io.github.snowberrifox.Sapphire.png
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .git
+          - build
+          - .flatpak-builder
+          - tests

@@ -79,6 +79,24 @@ def test_check_prefers_release_then_branch(monkeypatch):
         updater.Updater(FakeSession({"https://api.github.com/": FakeResp(500)})).check(force=True)
 
 
+def test_newer_main_beats_an_older_release(monkeypatch):
+    monkeypatch.setattr(updater, "__version__", "1.6.0")
+    rel = json.dumps({"tag_name": "v1.6.0", "tarball_url": "https://api.github.com/x/tarball/v1.6.0"})
+    raw = '__version__ = "1.6.1"\n'
+    u = updater.Updater(FakeSession({
+        "https://api.github.com/repos/SnowberriFox/Saphire/releases/latest": FakeResp(200, rel),
+        "https://raw.githubusercontent.com/SnowberriFox/Saphire/main/": FakeResp(200, raw)}))
+    found = u.check(force=True)
+    assert found and found.version == "1.6.1" and found.source == "branch"
+    # same version on both: the release (with its notes and bundle) wins
+    raw2 = '__version__ = "1.7.0"\n'
+    rel2 = json.dumps({"tag_name": "v1.7.0", "tarball_url": "t", "body": "notes"})
+    u = updater.Updater(FakeSession({
+        "https://api.github.com/repos/SnowberriFox/Saphire/releases/latest": FakeResp(200, rel2),
+        "https://raw.githubusercontent.com/SnowberriFox/Saphire/main/": FakeResp(200, raw2)}))
+    assert u.check(force=True).source == "release"
+
+
 def test_check_is_rate_limited(monkeypatch):
     monkeypatch.setattr(updater, "__version__", "1.0.0")
     s = FakeSession({"https://raw.githubusercontent.com/": FakeResp(200, '__version__ = "9.0.0"')})

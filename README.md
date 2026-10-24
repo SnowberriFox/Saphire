@@ -23,6 +23,24 @@ That's it. Sapphire appears in your app menu. The installer:
   doesn't care what Python your system has
 - bundles 7-Zip so `.rar` and `.7z` mods work out of the box
 
+### Or as a Flatpak
+
+Every push to `main` builds a `Sapphire.flatpak` bundle (Actions → Flatpak →
+the latest run → Artifacts), and tagged releases have it attached. Install it
+with:
+
+```sh
+flatpak install --user Sapphire.flatpak
+```
+
+It needs the Freedesktop 24.08 runtime from Flathub, which `flatpak install`
+offers to fetch. The Flatpak keeps its own settings and mod library, separate
+from a `install.sh` install. It's allowed to reach Steam's folders (native, Snap
+and Flatpak Steam, plus `/run/media`, `/media` and `/mnt` for other drives);
+if your Steam library lives somewhere else, grant it with
+`flatpak override --user --filesystem=/path/to/library io.github.snowberrifox.Sapphire`.
+To update, install the newer bundle the same way.
+
 ## Updating
 
 Sapphire updates itself. It checks GitHub on start and every few hours; when a
@@ -31,11 +49,11 @@ update is downloaded and installed into Sapphire's own folder, then you restart
 it. Mods, profiles and settings are untouched. Settings → Check for updates does
 the same on demand.
 
-It looks for the latest GitHub release first, and if there are no releases, for
-the version number on the `main` branch. So to ship an update: bump
-`__version__` in `sapphire/__init__.py` (and `version` in `pyproject.toml`),
-push to `main`, and every install picks it up. Tagging a release (`v1.3.0`) on
-GitHub works too and lets you attach notes.
+It compares the latest GitHub release with the version number on the `main`
+branch and offers whichever is newer. So to ship an update: bump `__version__`
+in `sapphire/__init__.py` (and `version` in `pyproject.toml`), push to `main`,
+and every install picks it up. Tagging a release (`v1.6.0`) on GitHub adds notes
+and the Flatpak bundle.
 
 If you're running from a git clone with `python -m sapphire`, the updater steps
 aside and you use `git pull` instead.
@@ -73,6 +91,9 @@ To uninstall: `./uninstall.sh` (keeps your mod library) or `./uninstall.sh --pur
 - **Settings → Behaviour**: install updates automatically, one skin per hero, and
   a background helper that keeps mods loading after game updates while Sapphire
   is closed (an XDG autostart entry, `~/.config/autostart/sapphire-helper.desktop`).
+- **Crosshair & config**: edit every crosshair setting with a live preview, save
+  crosshairs, share them as console commands, restore your old one; edit
+  `autoexec.cfg` (needs `+exec autoexec` in Deadlock's launch options).
 - **Camera fix for older skins** (on by default, Settings → Behaviour): a Deadlock
   update turned every hero's camera attachments by 120°, so skins compiled before
   it put the first-person camera in the wrong spot. On apply, Sapphire converts

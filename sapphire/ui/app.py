@@ -22,6 +22,7 @@ from sapphire.gamebanana import Cancelled
 from sapphire.ui import theme
 from sapphire.ui.browse import BrowsePage
 from sapphire.ui.audio import PreviewPlayer
+from sapphire.ui.crosshair_page import CrosshairPage
 from sapphire.ui.dialogs import ask_text, choose_file, choose_variants, confirm, error
 from sapphire.ui.downloads import DownloadsPage, Job, JobList
 from sapphire.ui.images import ImageCache
@@ -30,13 +31,17 @@ from sapphire.ui.installed import InstalledPage
 from sapphire.discord import Presence
 from sapphire.ui.onboarding import OnboardingDialog
 from sapphire.ui.pages import ProfilesPage, SettingsPage
-from sapphire.updater import Updater, UpdateError, restart, running_from_source
+from sapphire.updater import Updater, UpdateError, in_flatpak, restart, running_from_source
 from sapphire.ui.workers import JOB_POOL, NET_POOL, MainThreadCaller, run
 
 log = logging.getLogger("sapphire")
 MOD_FILE_TYPES = (".zip", ".7z", ".rar", ".vpk")
 PRESENCE_IMAGE = "https://raw.githubusercontent.com/SnowberriFox/Saphire/main/sapphire/assets/sapphire-512.png"
 PRESENCE_URL = "https://github.com/SnowberriFox/Saphire"
+
+
+PAGE_CROSSHAIR = 4
+PAGE_SETTINGS = 5
 
 
 class MainWindow(QMainWindow):
@@ -107,8 +112,9 @@ class MainWindow(QMainWindow):
         self.installed.busy = lambda uid: self.jobs.active_for(f"mod:{uid}") is not None
         self.profiles = ProfilesPage(manager)
         self.downloads = DownloadsPage(self.jobs)
+        self.crosshair = CrosshairPage(manager)
         self.settings = SettingsPage(manager)
-        for page in (self.browse, self.installed, self.profiles, self.downloads, self.settings):
+        for page in (self.browse, self.installed, self.profiles, self.downloads, self.crosshair, self.settings):
             self.stack.addWidget(page)
         outer.addWidget(self.stack, 1)
         self.setCentralWidget(central)
@@ -140,6 +146,7 @@ class MainWindow(QMainWindow):
         self.installed.rollback_requested.connect(self.roll_back)
         self.installed.status.connect(self.say)
         self.browse.collection_requested.connect(self.open_collection)
+        self.crosshair.status.connect(self.say)
         self.profiles.import_requested.connect(self.import_profile_file)
         self.settings.helper_changed.connect(self.set_helper)
         self.player = PreviewPlayer(manager.gb.session)
@@ -173,7 +180,7 @@ class MainWindow(QMainWindow):
         lay.addSpacing(18)
         self.nav = QButtonGroup(self)
         self.nav_buttons = []
-        for i, label in enumerate(("Browse", "Installed", "Profiles", "Downloads", "Settings")):
+        for i, label in enumerate(("Browse", "Installed", "Profiles", "Downloads", "Crosshair", "Settings")):
             b = QPushButton(label)
             b.setObjectName("NavButton")
             b.setCheckable(True)
@@ -221,7 +228,9 @@ class MainWindow(QMainWindow):
             self.browse.start()
         elif index == 2:
             self.profiles.reload()
-        elif index == 4:
+        elif index == PAGE_CROSSHAIR:
+            self.crosshair.refresh()
+        elif index == PAGE_SETTINGS:
             self.settings.refresh()
         self.update_presence()
 
@@ -296,7 +305,7 @@ class MainWindow(QMainWindow):
             details = "In Deadlock"
         else:
             details = {0: "Browsing mods", 1: "Managing mods", 2: "Switching profiles",
-                       3: "Downloading mods", 4: "In settings"}.get(page, "Managing mods")
+                       3: "Downloading mods", 4: "Tuning the crosshair", 5: "In settings"}.get(page, "Managing mods")
         state = f"{on} mod{'s' if on != 1 else ''} active" + (f" · {len(mods)} installed" if len(mods) != on else "")
         self.presence.update(details, state, large_image=PRESENCE_IMAGE, large_text="Sapphire for Deadlock",
                              buttons=[{"label": "Get Sapphire", "url": PRESENCE_URL}])
@@ -358,7 +367,7 @@ class MainWindow(QMainWindow):
 
     def _start_pages(self):
         if not self.mgr.game_dir:
-            self.go(4)
+            self.go(PAGE_SETTINGS)
             self._refresh_nav()
         else:
             self.go(0 if not self.mgr.lib.mods else 1)
@@ -412,7 +421,7 @@ class MainWindow(QMainWindow):
             if isinstance(exc, GameRunning):
                 self.running = True
             elif isinstance(exc, NoGame):
-                self.go(4)
+                self.go(PAGE_SETTINGS)
             else:
                 error(self, "Couldn't apply mods", str(exc))
             self._after_apply()
@@ -832,7 +841,7 @@ class MainWindow(QMainWindow):
                 if getattr(self, "_notes_conn", None) is not None:
                     self.update_notes.clicked.disconnect(self._notes_conn)
                 self._notes_conn = self.update_notes.clicked.connect(lambda: self._show_notes(rel))
-                self.update_go.setText(f"Update to {rel.version}")
+                self.update_go.setText(f"Download {rel.version}" if in_flatpak() else f"Update to {rel.version}")
                 self.update_go.setEnabled(True)
                 self.update_later.show()
                 self.update_bar.show()
@@ -865,6 +874,11 @@ class MainWindow(QMainWindow):
     def install_app_update(self):
         rel = self.updater.available
         if not rel:
+            return
+        if in_flatpak():
+            # A Flatpak can't replace itself: send people to the new bundle.
+            QDesktopServices.openUrl(QUrl("https://github.com/SnowberriFox/Saphire/releases/latest"))
+            self.say("Download the new .flatpak and open it (or run flatpak install on it) to update.", 15000)
             return
         if running_from_source():
             error(self, "Running from source", "You're running Sapphire from a source checkout, so update it "
@@ -1003,7 +1017,8 @@ def main(argv=None) -> int:
     setup_logging()
     log.info("Sapphire %s starting", __version__)
     QApplication.setApplicationName(APP_NAME)
-    QApplication.setDesktopFileName(APP_ID)
+    # Wayland matches the window to its .desktop file (and icon) by this name.
+    QApplication.setDesktopFileName(os.environ.get("FLATPAK_ID") or APP_ID)
     from sapphire import helper
     _gui_lock = helper.hold_gui_lock()  # noqa: F841 - held for the process lifetime; the helper backs off
     app = QApplication(argv)

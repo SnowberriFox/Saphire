@@ -1,0 +1,21 @@
+<!-- kv3 encoding:text:version{e21c7f3c-8a33-41c5-9977-a76d3a32aa0d} format:generic:version{7412167c-06e9-4698-aff2-e63eb59037e7} -->
+{
+	base = 
+	{
+		crosshair_themed = "false"
+		crosshair_pip_gap_static = "false"
+		crosshair_pip_width = "2"
+		crosshair_pip_height = "16"
+		crosshair_pip_gap = "4"
+		crosshair_pip_opacity = "0.5"
+		crosshair_pip_outline_border = "1"
+		crosshair_dot_opacity = "0.7"
+		crosshair_color_r = "255"
+		crosshair_color_g = "255"
+		crosshair_color_b = "255"
+		mouse_sensitivity = "1"
+	}
+	heroes = 
+	{
+	}
+}

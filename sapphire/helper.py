@@ -171,7 +171,12 @@ def _setup_logging():
 # ---------------------------------------------------------------------- autostart
 
 def autostart_file() -> Path:
-    base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    # Inside a Flatpak, XDG_CONFIG_HOME is the app's private folder, which the
+    # desktop never reads; the entry has to go in the real ~/.config/autostart.
+    if os.environ.get("FLATPAK_ID"):
+        base = Path.home() / ".config"
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
     return base / "autostart" / AUTOSTART_NAME
 
 

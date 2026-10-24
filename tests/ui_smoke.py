@@ -190,6 +190,10 @@ def build_state(mgr: Manager):
         mgr.lib.add(mod, top=False)
     mgr.lib.settings.onboarded = True
     mgr.lib.save()
+    cfg = mgr.game_dir / "game/citadel/cfg"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "citadel_hero_settings.lst").write_bytes((Path(__file__).with_name("hero_settings_sample.lst")).read_bytes())
+    (cfg / "autoexec.cfg").write_text("// my autoexec\nfps_max 240\n")
     mgr.save_profile("Mine")
     mgr.lib.mods[ALL[1].key].enabled = False
     mgr.save_profile("Partner's setup")
@@ -357,9 +361,25 @@ def main():
                 dlg.grab().save(str(OUT / "14-collection.png"))
                 print("saved 14-collection; chosen:", [s.name for s in dlg.chosen()], "button:", dlg.ok.text())
                 dlg.close()
-                profiles()
+                crosshair_shots()
             QTimer.singleShot(900, col)
         QTimer.singleShot(900, favs)
+
+    def crosshair_shots():
+        win.go(4)
+        tab = win.crosshair.crosshair
+        v = tab.values()
+        v.update(crosshair_color_r=40, crosshair_color_g=255, crosshair_color_b=140, crosshair_pip_gap=2,
+                 crosshair_dot_size=3, crosshair_pip_outline_border=1)
+        tab.set_values(v)
+        def a():
+            shot("15-crosshair")
+            ok = tab.values()["crosshair_color_g"] == 255
+            win.crosshair.tabs.setCurrentIndex(1)
+            QTimer.singleShot(400, lambda: (shot("16-autoexec"), print("crosshair editor values ok:", ok,
+                              "| autoexec:", repr(win.crosshair.autoexec.edit.toPlainText()[:30])),
+                              win.crosshair.tabs.setCurrentIndex(0), profiles()))
+        QTimer.singleShot(500, a)
 
     def profiles():
         win.go(2)
@@ -367,7 +387,7 @@ def main():
         QTimer.singleShot(400, lambda: (shot("4-profiles"), settings()))
 
     def settings():
-        win.go(4)
+        win.go(5)
         QTimer.singleShot(400, lambda: (shot("5-settings"), small_settings()))
 
     def small_settings():
@@ -393,7 +413,7 @@ def main():
         mgr.lib.settings.theme_colors = {"accent": "#B5423A"}
         mgr.lib.settings.ui_scale = "Normal"
         win.apply_appearance()
-        win.go(4)
+        win.go(5)
         win.settings._refresh_swatches()
         QTimer.singleShot(800, lambda: (shot("10-parchment-settings"), restore_theme()))
 

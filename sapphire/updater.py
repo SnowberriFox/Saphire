@@ -89,6 +89,11 @@ def running_from_source() -> bool:
     return (here.parent.parent / ".git").exists() or (here.parent.parent / "install.sh").exists()
 
 
+def in_flatpak() -> bool:
+    """Running from the Flatpak bundle: it's updated by installing a newer bundle."""
+    return bool(os.environ.get("FLATPAK_ID")) or Path("/.flatpak-info").is_file()
+
+
 def in_venv() -> bool:
     return sys.prefix != sys.base_prefix or (Path(sys.prefix) / "pyvenv.cfg").exists()
 
@@ -116,9 +121,17 @@ class Updater:
         with self._lock:
             if not force and time.time() - self.last_check < CHECK_INTERVAL:
                 return self.available
+        # Whichever is newer: a tagged release (has notes and the Flatpak bundle) or
+        # the version on main (fixes pushed between releases). A tie goes to the release.
         rel = self._latest_release()
-        if rel is None:
-            rel = self._branch_version()
+        try:
+            branch = self._branch_version()
+        except UpdateError:
+            if rel is None:
+                raise
+            branch = None
+        if branch and (rel is None or is_newer(branch.version, rel.version)):
+            rel = branch
         with self._lock:
             self.last_check = time.time()
             self.available = rel if rel and is_newer(rel.version) else None
@@ -172,6 +185,9 @@ class Updater:
 
     # ----------------------------------------------------------- installing
     def install(self, rel: Release, progress: Callable[[str, int, int], None] | None = None) -> None:
+        if in_flatpak():
+            raise UpdateError("This is the Flatpak version: download the new .flatpak from the GitHub "
+                              "releases page and open it to update.")
         if running_from_source():
             raise UpdateError("You're running Sapphire from a source checkout. Update it with git pull.")
         if not in_venv():

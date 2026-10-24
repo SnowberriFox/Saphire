@@ -265,3 +265,26 @@ def test_audio_backend_choice(tmp_path):
     (run / "pulse" / "native").write_text("")
     env = {"XDG_RUNTIME_DIR": str(run)}
     assert pick_audio_backend(env) == "pulseaudio"
+
+
+def test_steam_registry_running_app(tmp_path, monkeypatch):
+    from sapphire import steam
+    reg = tmp_path / ".steam" / "registry.vdf"
+    reg.parent.mkdir()
+    reg.write_text('"Registry"\n{\n\t"HKCU"\n\t{\n\t\t"Software"\n\t\t{\n\t\t\t"Valve"\n\t\t\t{\n\t\t\t\t"Steam"\n'
+                   '\t\t\t\t{\n\t\t\t\t\t"RunningAppID"\t\t"1422450"\n\t\t\t\t\t"language"\t\t"english"\n'
+                   '\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n')
+    assert steam.steam_running_app(tmp_path) == "1422450"
+    monkeypatch.undo()                      # drop conftest's is_game_running stub for this check
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("FLATPAK_ID", "io.github.snowberrifox.Sapphire")
+    assert steam.is_game_running() is True
+    reg.write_text(reg.read_text().replace('"1422450"', '"0"'))
+    assert steam.is_game_running() is False
+
+
+def test_flatpak_autostart_goes_to_the_real_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("FLATPAK_ID", "io.github.snowberrifox.Sapphire")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "sandbox-config"))
+    from pathlib import Path
+    assert helper.autostart_file() == Path.home() / ".config" / "autostart" / "sapphire-helper.desktop"

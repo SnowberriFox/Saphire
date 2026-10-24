@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.snowberrifox.Sapphire</id>
+  <name>Sapphire</name>
+  <summary>Deadlock mod manager for Linux</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.snowberrifox">
+    <name>SnowberriFox</name>
+  </developer>
+  <description>
+    <p>Browse GameBanana's Deadlock mods and sounds, install them in a click, and manage load order,
+      conflicts, variants, updates and profiles. Sapphire keeps gameinfo.gi patched after game updates and
+      fixes the first-person camera on skins made before Deadlock's camera update.</p>
+    <p>Sapphire is a fan project and isn't affiliated with Valve or GameBanana.</p>
+  </description>
+  <launchable type="desktop-id">io.github.snowberrifox.Sapphire.desktop</launchable>
+  <url type="homepage">https://github.com/SnowberriFox/Saphire</url>
+  <url type="bugtracker">https://github.com/SnowberriFox/Saphire/issues</url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.6.0" date="2026-10-24"/>
+  </releases>
+</component>

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Sapphire
+GenericName=Deadlock Mod Manager
+Comment=Browse, install and manage Deadlock mods from GameBanana
+Exec=sapphire %F
+Icon=io.github.snowberrifox.Sapphire
+Terminal=false
+Categories=Game;Utility;
+Keywords=deadlock;mods;gamebanana;skins;
+StartupWMClass=io.github.snowberrifox.Sapphire

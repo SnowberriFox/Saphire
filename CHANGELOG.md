@@ -3,6 +3,32 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.6.0 — 2026-10-24
+
+### Added
+- **Crosshair editor** (new Crosshair page). Every crosshair setting Deadlock
+  saves (colour, line thickness/length/gap/opacity, outlines and outline colour,
+  the centre dot) with a live preview over different backgrounds. "Use in
+  Deadlock" writes it into the game's settings and the Steam Cloud copy, after
+  saving your current crosshair so "Restore my old crosshair" puts it back
+  exactly. Save crosshairs by name, and copy/paste them as console commands
+  (works with Deadlock Mod Manager share codes too). Deadlock must be closed.
+- **autoexec.cfg editor** (Crosshair page → Autoexec), with the launch option it
+  needs (`+exec autoexec`) one click away. It never saves an empty file, which
+  can crash the game.
+- **Flatpak package.** Every push builds `Sapphire.flatpak` on GitHub (tagged
+  releases get it attached). Inside the Flatpak, Sapphire asks Steam whether
+  Deadlock is running (it can't see other processes), the background helper's
+  login entry goes in your real autostart folder, and updates point you to the
+  newest bundle.
+
+### Changed
+- Sapphire now installs PySide6-Essentials and PySide6-Addons instead of the
+  whole PySide6 bundle, skipping Qt WebEngine and PDF it never used (a much
+  smaller first install).
+- The updater offers whichever is newer, the latest GitHub release or the
+  version on main, so tagging releases doesn't hide fixes pushed in between.
+
 ## 1.5.0 — 2026-10-24
 
 ### Added
