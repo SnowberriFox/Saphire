@@ -13,11 +13,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable
 
-from sapphire import archive, conflicts, deploy, gameinfo, identify, importers, paths, steam
+from sapphire import (archive, camera_fix, conflicts, deploy, gameinfo, identify, importers, paths,
+                      steam)
 from sapphire.gamebanana import (Cancelled, GameBananaClient, GameBananaError, GBFile, newer_version,
                                  newest_file)
 from sapphire.library import InstalledMod, Library, Profile, StoredFile, StoredVpk, UpdateInfo
 from sapphire.vpk import VpkSet, chunk_index, find_sets
+from sapphire.vpk import write_vpk as vpk_write
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +58,9 @@ class Manager:
         self.gb = client or GameBananaClient()
         self.lock = threading.RLock()
         self.vpk_index = conflicts.VpkIndex()
+        self.camera = camera_fix.Fixer(paths.cache_dir() / "camera-fix", self.vpk_index)
+        self.camera_report: dict[str, list[camera_fix.ModelReport]] = {}
+        self._first: list[tuple[str, str, Path]] = []   # overlay VPKs deployed ahead of the mods
         self.identifier = identify.Identifier(self.gb.session)
         self._dirty = False  # changes waiting to be applied (e.g. game was running)
 
@@ -376,7 +381,8 @@ class Manager:
                 raise GameRunning()
             citadel = self.citadel()
             self.import_unmanaged()
-            placements = deploy.plan(self.lib.ordered())
+            self._first = self._camera_overlay(citadel)
+            placements = deploy.plan(self.lib.ordered(), self._first)
             result, record = deploy.deploy(citadel, placements, self.lib.deployed, force=force)
             self.lib.deployed = record
             self.lib.save()
@@ -386,7 +392,39 @@ class Manager:
             return result
 
     def expected_folders(self) -> list[str]:
-        return [f"citadel/{f}" for f in deploy.folders_in(deploy.plan(self.lib.ordered()))]
+        return [f"citadel/{f}" for f in deploy.folders_in(deploy.plan(self.lib.ordered(), self._first))]
+
+    @staticmethod
+    def overlay_path() -> Path:
+        return paths.data_dir() / "camera-fix" / "pak01_dir.vpk"
+
+    def _camera_overlay(self, citadel: Path) -> list[tuple[str, str, Path]]:
+        """Repair outdated skins' camera attachments into an overlay VPK (see camera_fix)."""
+        if not self.lib.settings.fix_camera:
+            self.camera_report = {}
+            return []
+        try:
+            plan = self.camera.plan(self.lib.ordered(), citadel)
+        except Exception:  # noqa: BLE001 - never let the fix block applying mods
+            log.exception("camera fix failed; applying without it")
+            self.camera_report = {}
+            return []
+        self.camera_report = plan.report
+        if not plan.files:
+            return []
+        dest = self.overlay_path()
+        digest = hashlib.sha1(b"".join(k.encode() + hashlib.sha1(v).digest()
+                                       for k, v in sorted(plan.files.items()))).hexdigest()
+        stamp = dest.with_suffix(".sha1")
+        try:
+            current = stamp.read_text().strip() if dest.is_file() else ""
+        except OSError:
+            current = ""
+        if current != digest:
+            vpk_write(dest, plan.files)
+            stamp.write_text(digest)
+        log.info("camera fix: %d model(s) repaired", len(plan.files))
+        return [(camera_fix.OVERLAY_UID, "camera fix", dest)]
 
     def gameinfo_needs_fix(self) -> bool:
         gd = self.game_dir
@@ -416,6 +454,8 @@ class Manager:
             citadel = self.citadel()
             _, record = deploy.deploy(citadel, [], self.lib.deployed)
             self.lib.deployed = record
+            self._first = []
+            self.camera_report = {}
             for mod in self.lib.mods.values():
                 mod.enabled = False
             self.lib.save()
@@ -441,6 +481,9 @@ class Manager:
             self.lib.profiles.clear()
             self.lib.active_profile = None
             self.lib.save()
+            self._first = []
+            self.camera_report = {}
+            shutil.rmtree(self.overlay_path().parent, ignore_errors=True)
             lib = paths.library_dir()
             for entry in lib.iterdir():
                 shutil.rmtree(entry, ignore_errors=True) if entry.is_dir() else entry.unlink(missing_ok=True)

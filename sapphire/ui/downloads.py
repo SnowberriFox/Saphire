@@ -27,6 +27,7 @@ class Job:
     finished: float = 0.0
     cancel: threading.Event = field(default_factory=threading.Event)
     retry: object = None             # callable to run it again, if any
+    key: str = ""                    # what it works on ("mod:<uid>"); one active job per key
 
     @property
     def active(self) -> bool:
@@ -47,6 +48,12 @@ class JobList(QObject):
 
     def active(self) -> list[Job]:
         return [j for j in self.jobs if j.active]
+
+    def active_for(self, key: str) -> Job | None:
+        """The queued or running job working on `key`, if any."""
+        if not key:
+            return None
+        return next((j for j in self.jobs if j.active and j.key == key), None)
 
     def running(self) -> Job | None:
         return next((j for j in self.jobs if j.state == "running"), None)

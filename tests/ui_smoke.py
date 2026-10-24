@@ -276,8 +276,46 @@ def main():
             shot("3c-downloads")
             for j in (j1, j2):
                 win.jobs.update(j, state="done")
-            profiles()
+            update_twice()
         QTimer.singleShot(600, after)
+
+    def update_twice():
+        # Update all pressed twice while the first batch is still going: no duplicates.
+        import threading
+        gate = threading.Event()
+        real = mgr.update
+        mgr.update = lambda uid, **kw: (gate.wait(5), mgr.lib.mods[uid])[1]
+        pending = [m.uid for m in mgr.lib.ordered() if m.update]
+        win.update_all()
+        win.update_all()
+        app.processEvents()
+        keyed = [j for j in win.jobs.jobs if j.key.startswith("mod:") and j.active]
+        print("update all twice:", len(pending), "pending ->", len(keyed), "jobs; button:",
+              win.installed.update_all_btn.text(), "enabled:", win.installed.update_all_btn.isEnabled())
+        gate.set()
+
+        def restore():
+            mgr.update = real
+            camera()
+        QTimer.singleShot(800, restore)
+
+    def camera():
+        from sapphire.camera_fix import ModelReport
+        mods = mgr.lib.ordered()
+        mgr.camera_report = {
+            mods[0].uid: [ModelReport("models/heroes_wip/haze/haze.vmdl_c", "fixed", "",
+                                      ["aim", "crouching_pivot", "near_00", "standing_pivot"] * 4)],
+            mods[2].uid: [ModelReport("models/heroes_wip/inferno/inferno_v4.vmdl_c", "warning",
+                                      "camera pivots use mixed frames; left as is")]}
+        win.go(1)
+        win.installed.reload()
+        win.installed.list.setCurrentRow(0)
+        def snap():
+            shot("3d-camera-fixed")
+            win.installed.view_group.button(1).setChecked(True)
+            QTimer.singleShot(500, lambda: (shot("3e-camera-list"), win.installed.view_group.button(0).setChecked(True),
+                                            setattr(mgr, "camera_report", {}), profiles()))
+        QTimer.singleShot(900, snap)
 
     def profiles():
         win.go(2)

@@ -3,6 +3,24 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.4.4 — 2026-10-24
+
+### Added
+- **Camera fix for skins made before Deadlock's camera update.** That update
+  turned the camera and aim points on every hero model by 120°, so older skins
+  put the first-person camera in the wrong place. When you apply, Sapphire now
+  checks each skin's model against the one in your installed game and, if it's
+  in the old layout, moves its camera points to the new one, keeping any offsets
+  the author made. Fixed models go in their own file loaded ahead of your mods;
+  the mod files themselves are never changed. Mods it fixed show a "Camera
+  fixed" badge; ones it couldn't safely fix show "Camera: check". On by default,
+  Settings → Behaviour to turn it off. Ported from Deadlock Mod Manager.
+
+### Fixed
+- **Update all queued mods again** when pressed while they were already
+  downloading (5 updates became 40 downloads). A mod can now only have one
+  install or update in progress; the button shows "Updating…" until they finish.
+
 ## 1.4.3 — 2026-10-18
 
 ### Added

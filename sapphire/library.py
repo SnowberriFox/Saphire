@@ -113,6 +113,7 @@ class Settings:
     installed_view: str = "grid"     # Installed page: "grid" or "list"
     discord_presence: bool = False
     discord_app_id: str = ""
+    fix_camera: bool = True          # repair the first-person camera on skins made before the camera update
 
 
 class Library:

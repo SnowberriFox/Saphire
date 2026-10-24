@@ -1,13 +1,17 @@
-"""Reading the directory tree of Valve VPK files (v1 and v2, Source 2 included).
+"""Valve VPK files (v1 and v2, Source 2 included).
 
-Only the tree at the start of the file is read, so listing a 500 MB skin
-takes milliseconds. Used for conflict detection.
+Listing only reads the tree at the start of the file, so listing a 500 MB skin
+takes milliseconds (used for conflict detection). `VpkReader` pulls single
+files out (from the directory file or its numbered chunks), and `write_vpk`
+makes a small single-file v2 VPK (used for the camera-fix overlay).
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
 import struct
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,12 +28,18 @@ class VpkError(ValueError):
     pass
 
 
+EMBEDDED = 0x7FFF   # archive index meaning "data is in the directory file itself"
+
+
 @dataclass
 class Entry:
     path: str          # as stored, e.g. "models/heroes/haze/haze.vmdl_c"
     crc: int
     length: int        # bytes in the data archive (not counting preload)
     preload: int
+    archive: int = EMBEDDED   # chunk number (pak01_000.vpk = 0), or EMBEDDED
+    offset: int = 0           # in the chunk, or from the start of the embedded data
+    preload_at: int = 0       # where the preload bytes sit inside the tree
 
 
 def list_entries(path: Path | str) -> list[str]:
@@ -85,16 +95,18 @@ def _parse_tree(tree: bytes) -> list[Entry]:
                     break
                 if pos + _ENTRY.size > len(tree):
                     raise VpkError("VPK tree is corrupt")
-                crc, preload, _idx, _off, length, term = _ENTRY.unpack_from(tree, pos)
+                crc, preload, idx, off, length, term = _ENTRY.unpack_from(tree, pos)
                 if term != 0xFFFF:
                     raise VpkError("VPK tree is corrupt (bad terminator)")
+                preload_at = pos + _ENTRY.size
                 pos += _ENTRY.size + preload
                 parts = []
                 if directory.strip():
                     parts.append(directory.strip().strip("/"))
                 filename = name if ext.strip() == "" else f"{name}.{ext}"
                 parts.append(filename)
-                out.append(Entry(path="/".join(parts), crc=crc, length=length, preload=preload))
+                out.append(Entry(path="/".join(parts), crc=crc, length=length, preload=preload,
+                                 archive=idx, offset=off, preload_at=preload_at))
     return out
 
 
@@ -158,3 +170,101 @@ def find_sets(root: Path) -> list[VpkSet]:
 def chunk_index(path: Path) -> str | None:
     m = CHUNK_RE.match(path.name)
     return m.group("idx") if m else None
+
+
+# ---------------------------------------------------------------------- reading files
+
+class VpkReader:
+    """Reads files out of one VPK. `chunks` maps chunk numbers to their files; by
+    default they're found next to the directory file (pak01_dir.vpk -> pak01_000.vpk)."""
+
+    def __init__(self, path: Path | str, chunks: dict[int, Path] | None = None):
+        self.path = Path(path)
+        with open(self.path, "rb") as fh:
+            header = fh.read(12)
+            if len(header) < 12:
+                raise VpkError("file too small to be a VPK")
+            sig, version, tree_size = struct.unpack("<III", header)
+            if sig != VPK_SIGNATURE:
+                raise VpkError("not a VPK file")
+            if version == 2:
+                fh.read(16)
+                header_len = 28
+            elif version == 1:
+                header_len = 12
+            else:
+                raise VpkError(f"unsupported VPK version {version}")
+            if tree_size > MAX_TREE:
+                raise VpkError("VPK tree is unreasonably large")
+            self.tree = fh.read(tree_size)
+        self.data_start = header_len + tree_size
+        self.entries = {e.path.lower(): e for e in _parse_tree(self.tree)}
+        self._chunks = dict(chunks or {})
+        if chunks is None and self.path.name.lower().endswith("_dir.vpk"):
+            stem = self.path.name[: -len("_dir.vpk")]
+            for p in self.path.parent.iterdir():
+                m = CHUNK_RE.match(p.name)
+                if m and m.group("stem").lower() == stem.lower():
+                    self._chunks[int(m.group("idx"))] = p
+
+    def __contains__(self, path: str) -> bool:
+        return path.lower() in self.entries
+
+    def read(self, path: str) -> bytes:
+        e = self.entries.get(path.lower())
+        if e is None:
+            raise KeyError(path)
+        data = self.tree[e.preload_at:e.preload_at + e.preload]
+        if e.length:
+            if e.archive == EMBEDDED:
+                src, at = self.path, self.data_start + e.offset
+            else:
+                src = self._chunks.get(e.archive)
+                if src is None:
+                    raise VpkError(f"missing data chunk {e.archive:03d} for {self.path.name}")
+                at = e.offset
+            with open(src, "rb") as fh:
+                fh.seek(at)
+                body = fh.read(e.length)
+            if len(body) != e.length:
+                raise VpkError(f"{path} is truncated in {Path(src).name}")
+            data += body
+        return data
+
+
+# ---------------------------------------------------------------------- writing
+
+def write_vpk(dest: Path | str, files: dict[str, bytes]) -> None:
+    """Write a single-file v2 VPK holding `files` ({"models/x/y.vmdl_c": bytes}),
+    the layout ValvePak and Valve's own tool produce (tree, embedded data, then
+    the tree/archive/whole-file MD5s; no signature)."""
+    groups: dict[str, dict[str, list[tuple[str, bytes]]]] = {}
+    for path, data in files.items():
+        path = path.replace("\\", "/").strip("/")
+        folder, _, filename = path.rpartition("/")
+        name, dot, ext = filename.rpartition(".")
+        if not dot:
+            name, ext = filename, ""
+        groups.setdefault(ext or " ", {}).setdefault(folder or " ", []).append((name, data))
+    tree = bytearray()
+    body = bytearray()
+    for ext in sorted(groups):
+        tree += ext.encode() + b"\0"
+        for folder in sorted(groups[ext]):
+            tree += folder.encode() + b"\0"
+            for name, data in sorted(groups[ext][folder]):
+                tree += name.encode() + b"\0"
+                tree += _ENTRY.pack(zlib.crc32(data) & 0xFFFFFFFF, 0, EMBEDDED, len(body), len(data), 0xFFFF)
+                body += data
+            tree += b"\0"
+        tree += b"\0"
+    tree += b"\0"
+    header = struct.pack("<IIIIIII", VPK_SIGNATURE, 2, len(tree), len(body), 0, 48, 0)
+    archive_md5s = b""
+    md5s = hashlib.md5(bytes(tree)).digest() + hashlib.md5(archive_md5s).digest()
+    whole = hashlib.md5(header + bytes(tree) + bytes(body) + archive_md5s + md5s).digest()
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".tmp")
+    tmp.write_bytes(header + bytes(tree) + bytes(body) + archive_md5s + md5s + whole)
+    tmp.replace(dest)

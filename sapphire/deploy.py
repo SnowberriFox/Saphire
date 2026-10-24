@@ -53,10 +53,17 @@ def folder_name(index: int) -> str:
     return "addons" if index == 0 else f"addons{index + 1}"
 
 
-def plan(mods: list[InstalledMod]) -> list[Placement]:
-    """Placements for the enabled mods, given in priority order (first wins)."""
+def plan(mods: list[InstalledMod], first: list[tuple[str, str, Path]] | None = None) -> list[Placement]:
+    """Placements for the enabled mods, given in priority order (first wins).
+    `first` = (uid, label, file) single-file VPKs that go ahead of every mod
+    (the camera-fix overlay: it only holds repaired copies of files that were
+    already winning, so putting it on top changes no outcome)."""
     out: list[Placement] = []
     n = 0
+    for uid, label, src in first or []:
+        out.append(Placement(uid=uid, vpk_label=label, folder=folder_name(0), slot=n + 1,
+                             src=Path(src), dst_name=f"pak{n + 1:02d}_dir.vpk"))
+        n += 1
     for mod in mods:
         if not mod.enabled:
             continue

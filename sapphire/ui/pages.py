@@ -209,6 +209,16 @@ class SettingsPage(QWidget):
         auto_hint.setObjectName("Muted")
         auto_hint.setWordWrap(True)
         root.addWidget(auto_hint)
+        self.fix_camera = QCheckBox("Fix the first-person camera on skins made before the camera update")
+        self.fix_camera.setChecked(manager.lib.settings.fix_camera)
+        self.fix_camera.toggled.connect(self._fix_camera)
+        root.addWidget(self.fix_camera)
+        cam_hint = QLabel("A Deadlock update moved where the camera sits on every hero. Older skins still use "
+                          "the old spot, so first person looks wrong. Sapphire corrects their camera points "
+                          "into a separate file loaded in front of your mods; the mods themselves aren't changed.")
+        cam_hint.setObjectName("Muted")
+        cam_hint.setWordWrap(True)
+        root.addWidget(cam_hint)
 
         root.addWidget(_section("Appearance"))
         ap = QHBoxLayout()
@@ -463,6 +473,11 @@ class SettingsPage(QWidget):
         else:
             error(self, "Not found", "Couldn't find Deadlock in any Steam library (native, Flatpak or Snap). "
                   "Use Choose… to point at it.")
+
+    def _fix_camera(self, on):
+        self.mgr.lib.settings.fix_camera = on
+        self.mgr.lib.save()
+        self.apply_now.emit()
 
     def _auto_apply(self, on):
         self.mgr.lib.settings.auto_apply = on

@@ -64,6 +64,13 @@ To uninstall: `./uninstall.sh` (keeps your mod library) or `./uninstall.sh --pur
 - **Discord**: optional Rich Presence (Settings → Discord). It needs a Discord
   Application ID, which anyone can create for free at
   discord.com/developers/applications; one ID can be shared.
+- **Camera fix for older skins** (on by default, Settings → Behaviour): a Deadlock
+  update turned every hero's camera attachments by 120°, so skins compiled before
+  it put the first-person camera in the wrong spot. On apply, Sapphire converts
+  the winning copy of each affected hero model to the current layout (keeping the
+  author's own offsets) and loads it from an overlay `pak01_dir.vpk` in front of
+  your mods. Mod files are never changed. Ported from Deadlock Mod Manager's
+  camera-frame repair; anything it can't convert safely is left alone and flagged.
 - **Reapply** (Installed page): turns every mod off and back on by rewriting the
   whole addons folder, for when something looks wrong in game.
 - **Launch Deadlock**: applies everything, double-checks `gameinfo.gi`, then

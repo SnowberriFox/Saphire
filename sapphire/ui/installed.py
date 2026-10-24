@@ -138,6 +138,11 @@ class RowDelegate(QStyledItemDelegate):
                 badges.append((f"Overridden: {c.losing} file{'s' if c.losing != 1 else ''}", theme.DANGER_BG, theme.DANGER_TEXT))
             if c.winning:
                 badges.append((f"Wins: {c.winning} file{'s' if c.winning != 1 else ''}", theme.OK_BG, theme.VERDIGRIS))
+        cam = self.page.camera_status(uid)
+        if mod.enabled and cam == "fixed":
+            badges.append(("Camera fixed", theme.OK_BG, theme.VERDIGRIS))
+        elif mod.enabled and cam == "warning":
+            badges.append(("Camera: check", theme.DANGER_BG, theme.DANGER_TEXT))
         bf = QFont(p.font())
         bf.setPixelSize(theme.px(11))
         bf.setBold(True)
@@ -258,6 +263,11 @@ class RowDelegate(QStyledItemDelegate):
                 badges.append((f"Overridden ×{c.losing}", theme.DANGER_BG, theme.DANGER_TEXT))
             elif c.winning:
                 badges.append((f"Wins ×{c.winning}", theme.OK_BG, theme.VERDIGRIS))
+        cam = self.page.camera_status(uid)
+        if mod.enabled and cam == "fixed":
+            badges.append(("Cam fixed", theme.OK_BG, theme.VERDIGRIS))
+        elif mod.enabled and cam == "warning":
+            badges.append(("Cam ?", theme.DANGER_BG, theme.DANGER_TEXT))
         bx = r.left() + theme.px(8)
         for text, bg, fg in badges:
             w = p.fontMetrics().horizontalAdvance(text) + theme.px(12)
@@ -447,9 +457,12 @@ class DetailPanel(QScrollArea):
         toggle = QPushButton("Turn off" if mod.enabled else "Turn on")
         toggle.clicked.connect(lambda: self.page.toggle(mod.uid))
         row.addWidget(toggle)
+        busy = self.page.busy(mod.uid)
+        self._shown_busy = busy
         if mod.update:
-            upd = QPushButton("Update")
+            upd = QPushButton("Updating…" if busy else "Update")
             upd.setProperty("kind", "primary")
+            upd.setEnabled(not busy)
             upd.clicked.connect(lambda: self.page.update_requested.emit(mod.uid))
             row.addWidget(upd)
         if mod.url:
@@ -493,6 +506,28 @@ class DetailPanel(QScrollArea):
                              "usually separate files) so you can switch to another one")
             fetch.clicked.connect(lambda: self.page.refetch_requested.emit(mod.uid))
             self.lay.addWidget(fetch, 0, Qt.AlignLeft)
+
+        cam = self.page.mgr.camera_report.get(mod.uid) if mod.enabled else None
+        if cam:
+            h = QLabel("Camera")
+            h.setObjectName("SideTitle")
+            self.lay.addWidget(h)
+            lines = []
+            for r in cam:
+                model = r.path.rsplit("/", 1)[-1]
+                if r.status == "fixed":
+                    lines.append(f"✓ {model}: made before Deadlock's camera update, so Sapphire moved its "
+                                 f"{len(r.attachments)} camera and aim points to the current layout. "
+                                 "Your mod file isn't changed; the fix sits in its own file in front of it.")
+                else:
+                    lines.append(f"! {model}: looks like it's from before the camera update but couldn't "
+                                 f"be fixed automatically ({r.detail}). If first person looks off, check "
+                                 "GameBanana for an update.")
+            msg = QLabel("\n\n".join(lines))
+            msg.setObjectName("Muted")
+            msg.setWordWrap(True)
+            msg.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            self.lay.addWidget(msg)
 
         h = QLabel("Conflicts")
         h.setObjectName("SideTitle")
@@ -558,6 +593,7 @@ class InstalledPage(QWidget):
     def __init__(self, manager, images):
         super().__init__()
         self.mgr = manager
+        self.busy = lambda uid: False   # MainWindow replaces this: is a download running for the mod?
         self.images = images
         self.conflicts: dict[str, ModConflicts] = {}
         self.rank: dict[str, int] = {}
@@ -703,14 +739,37 @@ class InstalledPage(QWidget):
         mods = self.mgr.lib.ordered()
         on = [m for m in mods if m.enabled]
         self.rank = {m.uid: i + 1 for i, m in enumerate(on)}
-        n_upd = sum(1 for m in mods if m.update)
         self.count.setText(f"{len(on)} on, {len(mods) - len(on)} off" if mods else "")
-        self.update_all_btn.setText(f"Update all ({n_upd})" if n_upd else "Update all")
-        self.update_all_btn.setVisible(n_upd > 0)
+        self._update_button()
         self.identify_btn.setVisible(any(m.source == "local" for m in mods))
         self.empty.setVisible(not mods)
         self.list.setVisible(bool(mods))
         self.list.viewport().update()
+
+    def camera_status(self, uid: str) -> str | None:
+        """'fixed' if the camera fix repaired this mod's model(s), 'warning' if it couldn't."""
+        rep = self.mgr.camera_report.get(uid)
+        if not rep:
+            return None
+        return "fixed" if any(r.status == "fixed" for r in rep) else "warning"
+
+    def _update_button(self):
+        pending = [m for m in self.mgr.lib.ordered() if m.update]
+        busy = [m for m in pending if self.busy(m.uid)]
+        waiting = len(pending) - len(busy)
+        if waiting:
+            self.update_all_btn.setText(f"Update all ({waiting})")
+            self.update_all_btn.setEnabled(True)
+        elif busy:
+            self.update_all_btn.setText(f"Updating {len(busy)}…")
+            self.update_all_btn.setEnabled(False)
+        self.update_all_btn.setVisible(bool(pending))
+
+    def jobs_changed(self):
+        """Downloads started or finished: refresh the Update all button and the open panel."""
+        self._update_button()
+        if self.detail.uid and self.busy(self.detail.uid) != getattr(self.detail, "_shown_busy", None):
+            self.detail.show_mod(self.detail.uid)
 
     def set_conflicts(self, conflicts):
         self.conflicts = conflicts

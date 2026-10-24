@@ -103,6 +103,7 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.browse = BrowsePage(manager, self.images)
         self.installed = InstalledPage(manager, self.images)
+        self.installed.busy = lambda uid: self.jobs.active_for(f"mod:{uid}") is not None
         self.profiles = ProfilesPage(manager)
         self.downloads = DownloadsPage(self.jobs)
         self.settings = SettingsPage(manager)
@@ -382,8 +383,10 @@ class MainWindow(QMainWindow):
                 self.say(f"Reapplied: {result.written} file{'s' if result.written != 1 else ''} rewritten, "
                          f"{n} mod{'s' if n != 1 else ''} on, gameinfo.gi checked.", 12000)
             elif not quiet:
+                fixed = sum(1 for rep in self.mgr.camera_report.values() if any(r.status == "fixed" for r in rep))
                 self.say(f"Applied. {n} mod{'s' if n != 1 else ''} on."
-                         + (f" ({result.written} files written)" if result.written else ""))
+                         + (f" ({result.written} files written)" if result.written else "")
+                         + (f" Camera fixed on {fixed} older skin{'s' if fixed != 1 else ''}." if fixed else ""))
             self._after_apply()
 
         def failed(exc):
@@ -497,6 +500,7 @@ class MainWindow(QMainWindow):
 
     # -------------------------------------------------------------- jobs
     def _jobs_ui(self):
+        self.installed.jobs_changed()
         active = self.jobs.active()
         running = self.jobs.running()
         visible = bool(active)
@@ -523,9 +527,15 @@ class MainWindow(QMainWindow):
     def _chooser(self, sets, name):
         return self.caller.call(choose_variants, self, sets, name)
 
-    def _queue(self, label: str, fn, *args, success: str = "", kind: str = "install", silent: bool = False):
-        job = Job(label, kind=kind)
-        job.retry = lambda: self._queue(label, fn, *args, success=success, kind=kind, silent=silent)
+    def _queue(self, label: str, fn, *args, success: str = "", kind: str = "install", silent: bool = False,
+               key: str = ""):
+        # One active job per thing: clicking Update all (or Install) again while it's
+        # still queued or running must not line the same download up a second time.
+        busy = self.jobs.active_for(key)
+        if busy is not None:
+            return busy
+        job = Job(label, kind=kind, key=key)
+        job.retry = lambda: self._queue(label, fn, *args, success=success, kind=kind, silent=silent, key=key)
         self.jobs.add(job)
 
         def progress(stage, done, total):
@@ -564,8 +574,9 @@ class MainWindow(QMainWindow):
         def do(model, gb_id, file, add, choose=None, progress=None, cancel=None):
             return self.mgr.install_gamebanana(model, gb_id, file, choose=choose,
                                                progress=progress, cancel=cancel, add=add)
+        fid = file.id if file is not None else "newest"
         self._queue(label, do, model, gb_id, file, add,
-                    success="Installed {name}.")
+                    success="Installed {name}.", key=f"gb:{model}:{gb_id}:{fid}:{int(add)}")
 
     def update_mod(self, uid: str):
         mod = self.mgr.lib.mods.get(uid)
@@ -574,7 +585,7 @@ class MainWindow(QMainWindow):
 
         def do(uid, choose=None, progress=None, cancel=None):
             return self.mgr.update(uid, choose=choose, progress=progress, cancel=cancel)
-        self._queue(mod.name, do, uid, success="Updated {name}.", kind="update")
+        self._queue(mod.name, do, uid, success="Updated {name}.", kind="update", key=f"mod:{uid}")
 
     def refetch_mod(self, uid: str):
         """Other variants: list the mod's GameBanana files, let the user pick one, download it."""
@@ -595,7 +606,7 @@ class MainWindow(QMainWindow):
             self._queue(f"{mod.name} — {picked.filename}", do, uid, picked.id,
                         success=("Downloaded {name} again; every VPK it ships is kept." if again
                                  else "Switched {name} to " + picked.filename + "."),
-                        kind="update")
+                        kind="update", key=f"mod:{uid}")
 
         def failed(exc):
             self.say("")
@@ -605,7 +616,7 @@ class MainWindow(QMainWindow):
 
     def update_all(self):
         for mod in [m for m in self.mgr.lib.ordered() if m.update]:
-            self.update_mod(mod.uid)
+            self.update_mod(mod.uid)   # skips mods already queued or updating
 
     def add_files(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Add mod files", str(Path.home() / "Downloads"),
