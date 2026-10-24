@@ -21,10 +21,20 @@ jobs:
           manifest-path: packaging/flatpak/io.github.snowberrifox.Sapphire.yml
           cache-key: flatpak-builder-${{ hashFiles('packaging/flatpak/python-deps.json') }}
       - name: Self-test inside the Flatpak
+        shell: bash
         run: |
-          flatpak install --system -y --noninteractive Sapphire.flatpak
-          flatpak info io.github.snowberrifox.Sapphire
-          flatpak run --env=QT_QPA_PLATFORM=offscreen io.github.snowberrifox.Sapphire --selftest
+          set +e
+          {
+            flatpak install --system -y --noninteractive Sapphire.flatpak &&
+            flatpak info io.github.snowberrifox.Sapphire &&
+            flatpak run --env=QT_QPA_PLATFORM=offscreen io.github.snowberrifox.Sapphire --selftest
+          } > selftest.txt 2>&1
+          code=$?
+          cat selftest.txt
+          # the result as an annotation too, so it can be read without the raw log
+          msg=$(grep -v '^\s*$' selftest.txt | tail -n 25 | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+          if [ $code -ne 0 ]; then echo "::error title=Self-test failed::$msg"; else echo "::notice title=Self-test passed::$msg"; fi
+          exit $code
       - name: Attach to the release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
