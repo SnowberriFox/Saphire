@@ -148,8 +148,13 @@ def test_browse_drops_other_games(monkeypatch):
     assert seen["path"] == "Mod/Index"
     assert seen["params"]["_aFilters[Generic_Category]"] == 33
     assert seen["params"]["_sSort"] == "Generic_MostLiked"
-    c.browse(search="haze")
-    assert seen["path"] == "Util/Search/Results" and seen["params"]["_sSearchString"] == "haze"
+    # Searching keeps the category and sort (row 27): it's the same Index call
+    # with a name filter, and commas (which end the filter value) become spaces.
+    c.browse(search="  gold,  haze ", category_id=33, sort="popular")
+    assert seen["path"] == "Mod/Index"
+    assert seen["params"]["_aFilters[Generic_Name]"] == "contains,gold haze"
+    assert seen["params"]["_aFilters[Generic_Category]"] == 33
+    assert seen["params"]["_sSort"] == "Generic_MostLiked"
 
 
 # --------------------------------------------------------------- full manager

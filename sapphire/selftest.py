@@ -104,6 +104,7 @@ def run() -> int:
         theme.apply(app)
         lib = Library()
         lib.settings.onboarded = True       # skip the first-run wizard
+        lib.settings.patch_notes = "never"  # and the patch notes window
         lib.save()
         win = MainWindow(Manager(lib))
         win.show()

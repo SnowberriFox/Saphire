@@ -14,8 +14,7 @@ from sapphire.conflicts import ModConflicts
 from sapphire.library import InstalledMod
 from sapphire.ui import theme
 from sapphire.ui.browse import fmt_date
-
-ROLE_UID = Qt.UserRole + 1
+from sapphire.ui.reorder import ROLE_UID, ReorderList, draw_lock
 
 
 class RowDelegate(QStyledItemDelegate):
@@ -69,12 +68,18 @@ class RowDelegate(QStyledItemDelegate):
             p.drawPath(path)
 
         dim = not mod.enabled
-        # grip
-        p.setPen(QColor(theme.LINE))
+        if self.page.list.drag_uid == uid:
+            p.setOpacity(0.45)
+        # grip, or a padlock when the mod is locked to its slot
         f = QFont(p.font())
         f.setPixelSize(theme.px(14))
         p.setFont(f)
-        p.drawText(QRectF(r.left() + 4, r.top(), 14, r.height()), Qt.AlignCenter, "⠿")
+        if mod.locked:
+            s = theme.px(13)
+            draw_lock(p, QRectF(r.left() + 5, r.center().y() - s / 2, s, s), theme.ACCENT)
+        else:
+            p.setPen(QColor(theme.LINE))
+            p.drawText(QRectF(r.left() + 4, r.top(), 14, r.height()), Qt.AlignCenter, "⠿")
 
         # check toggle where the style expects it (so clicks land on it)
         check = style.subElementRect(QStyle.SE_ItemViewItemCheckIndicator, opt, opt.widget)
@@ -94,12 +99,12 @@ class RowDelegate(QStyledItemDelegate):
             p.drawPath(cp)
 
         x = cr.right() + 12
-        # priority number (only meaningful for enabled mods)
+        # load-order position (#1 wins clashes); dimmed for mods that are off
         rank = self.page.rank.get(uid)
         f.setPixelSize(theme.px(13))
         f.setBold(True)
         p.setFont(f)
-        p.setPen(QColor(theme.ACCENT if rank and not dim else theme.LINE))
+        p.setPen(QColor(theme.MUTED if dim else theme.ACCENT))
         p.drawText(QRectF(x, r.top(), 30, r.height()), Qt.AlignVCenter | Qt.AlignRight,
                    f"{rank}" if rank else "–")
         x += 40
@@ -194,6 +199,8 @@ class RowDelegate(QStyledItemDelegate):
         selected = bool(option.state & QStyle.State_Selected)
         hovered = bool(option.state & QStyle.State_MouseOver)
         dim = not mod.enabled
+        if self.page.list.drag_uid == uid:
+            p.setOpacity(0.45)
         path = QPainterPath()
         path.addRoundedRect(r, 8, 8)
         p.fillPath(path, QColor(theme.PANEL))
@@ -232,13 +239,18 @@ class RowDelegate(QStyledItemDelegate):
         p.setFont(bf)
         if rank:
             text = f"#{rank}"
-            w = p.fontMetrics().horizontalAdvance(text) + theme.px(12)
+            lock_w = theme.px(14) if mod.locked else 0
+            w = p.fontMetrics().horizontalAdvance(text) + theme.px(12) + lock_w
             br = QRectF(r.left() + theme.px(8), r.top() + theme.px(8), w, theme.px(20))
             bp = QPainterPath()
             bp.addRoundedRect(br, theme.px(10), theme.px(10))
-            p.fillPath(bp, QColor(theme.ACCENT))
-            p.setPen(QColor(theme.ON_ACCENT))
-            p.drawText(br, Qt.AlignCenter, text)
+            fg = theme.ON_ACCENT if not dim else theme.MUTED
+            p.fillPath(bp, QColor(theme.ACCENT if not dim else theme.BG))
+            p.setPen(QColor(fg))
+            p.drawText(br.adjusted(lock_w, 0, 0, 0), Qt.AlignCenter, text)
+            if mod.locked:
+                s = theme.px(11)
+                draw_lock(p, QRectF(br.left() + theme.px(7), br.center().y() - s / 2 - 0.5, s, s), fg)
         tr = self._toggle_rect(option.rect)
         tp = QPainterPath()
         tp.addRoundedRect(tr, 5, 5)
@@ -299,13 +311,9 @@ class RowDelegate(QStyledItemDelegate):
         p.restore()
 
 
-class ModList(QListWidget):
-    reordered = Signal()
-
+class ModList(ReorderList):
     def __init__(self):
         super().__init__()
-        self.setDragDropMode(QAbstractItemView.InternalMove)
-        self.setDefaultDropAction(Qt.MoveAction)
         self.setSelectionMode(QAbstractItemView.SingleSelection)
         self.setMouseTracking(True)
         self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
@@ -327,7 +335,8 @@ class ModList(QListWidget):
             self.setFlow(QListWidget.TopToBottom)
             self.setWrapping(False)
         self.setResizeMode(QListWidget.Adjust)
-        self.setMovement(QListWidget.Static)   # Static + InternalMove = drop reorders items
+        self.setMovement(QListWidget.Static)
+        self.setDragEnabled(False)   # ReorderList does the dragging (see reorder.py)
         self.relayout()
 
     def relayout(self):
@@ -348,10 +357,6 @@ class ModList(QListWidget):
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self.relayout()
-
-    def dropEvent(self, e):
-        super().dropEvent(e)
-        self.reordered.emit()
 
 
 class DetailPanel(QScrollArea):
@@ -374,6 +379,29 @@ class DetailPanel(QScrollArea):
         page.images.loaded.connect(self._image_loaded)
         self.show_mod(None)
 
+    def _load_order(self, mod: InstalledMod):
+        h = QLabel("Load order")
+        h.setObjectName("SideTitle")
+        self.lay.addWidget(h)
+        pos, total = self.page.rank.get(mod.uid), len(self.page.mgr.lib.order)
+        row = QHBoxLayout()
+        where = QLabel(f"#{pos} of {total}" + (", locked" if mod.locked else ""))
+        where.setStyleSheet("background: transparent;")
+        row.addWidget(where, 1)
+        lock = QPushButton("Unlock" if mod.locked else f"Lock at #{pos}")
+        lock.setToolTip("A locked mod keeps its number while you drag, install or remove other mods")
+        lock.clicked.connect(lambda: self.page.set_locked(mod.uid, not mod.locked))
+        row.addWidget(lock)
+        edit = QPushButton("Priority…")
+        edit.clicked.connect(self.page.priority_requested)
+        row.addWidget(edit)
+        self.lay.addLayout(row)
+        if mod.locked:
+            note = QLabel("Stays at this number while you reorder, install or remove other mods.")
+            note.setObjectName("Muted")
+            note.setWordWrap(True)
+            self.lay.addWidget(note)
+
     def _variants_changed(self, uid: str):
         from sapphire.ui.dialogs import error
         labels = [label for label, cb in self._variant_boxes if cb.isChecked()]
@@ -394,11 +422,13 @@ class DetailPanel(QScrollArea):
         while self.lay.count():
             it = self.lay.takeAt(0)
             if it.widget():
+                it.widget().hide()          # gone now, not just when the deferred delete runs
                 it.widget().deleteLater()
             elif it.layout():
                 while it.layout().count():
                     sub = it.layout().takeAt(0)
                     if sub.widget():
+                        sub.widget().hide()
                         sub.widget().deleteLater()
 
     def show_mod(self, uid):
@@ -408,7 +438,7 @@ class DetailPanel(QScrollArea):
         if mod is None:
             lbl = QLabel("Select a mod to see what it changes and what it clashes with.\n\n"
                          "Drag mods to reorder. When two mods change the same file, the one "
-                         "higher in the list wins.")
+                         "higher in the list wins. Right-click a mod to lock it in place.")
             lbl.setObjectName("Muted")
             lbl.setWordWrap(True)
             self.lay.addWidget(lbl)
@@ -514,6 +544,8 @@ class DetailPanel(QScrollArea):
             u.setObjectName("Muted")
             u.setWordWrap(True)
             self.lay.addWidget(u)
+
+        self._load_order(mod)
 
         if len(mod.vpks) > 1 or (mod.source == "gamebanana" and mod.gb_id):
             h = QLabel("Variants")
@@ -647,6 +679,7 @@ class InstalledPage(QWidget):
     rollback_requested = Signal(str)  # uid
     removed = Signal(str)
     status = Signal(str)
+    priority_requested = Signal()
 
     def __init__(self, manager, images):
         super().__init__()
@@ -715,6 +748,11 @@ class InstalledPage(QWidget):
         self.reapply_btn.setToolTip("Turn every mod off and back on: rewrites all files in the game's addons folder "
                                     "and re-checks gameinfo.gi. Use it if something looks wrong in game.")
         self.reapply_btn.clicked.connect(self.reapply_requested)
+        self.priority_btn = QPushButton("Priority…")
+        self.priority_btn.setToolTip("A compact list of every mod in load order: drag, type a position, "
+                                     "or lock mods in place")
+        self.priority_btn.clicked.connect(self.priority_requested)
+        actions.addWidget(self.priority_btn)
         all_on = QPushButton("All on")
         all_on.clicked.connect(lambda: self.set_all(True))
         all_off = QPushButton("All off")
@@ -736,7 +774,9 @@ class InstalledPage(QWidget):
         self.list.setItemDelegate(self.delegate)
         self.list.set_mode(manager.lib.settings.installed_view if manager.lib.settings.installed_view in ("grid", "list") else "grid")
         self._set_hint()
-        self.list.reordered.connect(self._reordered)
+        self.list.moved.connect(self._moved)
+        self.list.refused.connect(self._drag_refused)
+        self.list.can_drag = lambda uid: not (self.mgr.lib.mods.get(uid) and self.mgr.lib.mods[uid].locked)
         self.list.itemChanged.connect(self._item_changed)
         self.list.currentItemChanged.connect(self._current_changed)
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -757,10 +797,11 @@ class InstalledPage(QWidget):
 
     def _set_hint(self):
         if self.delegate.mode == "grid":
-            self.hint.setText("Drag to reorder: #1 loads first and wins when two mods change the same file. "
-                              "Click the box on a card to turn it off or on.")
+            self.hint.setText("Drag cards to reorder: #1 wins when two mods change the same file. "
+                              "Click the box on a card to turn it off or on. Right-click to lock a mod in place.")
         else:
-            self.hint.setText("Drag to reorder. Higher in the list wins when two mods change the same file.")
+            self.hint.setText("Drag to reorder: higher in the list wins when two mods change the same file. "
+                              "Right-click to lock a mod in place.")
 
     def _view_changed(self, mode: str):
         self.mgr.lib.settings.installed_view = mode
@@ -784,7 +825,7 @@ class InstalledPage(QWidget):
         for mod in self.mgr.lib.ordered():
             item = QListWidgetItem()
             item.setData(ROLE_UID, mod.uid)
-            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled | Qt.ItemIsUserCheckable)
+            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Checked if mod.enabled else Qt.Unchecked)
             item.setToolTip(mod.name)
             self.list.addItem(item)
@@ -798,7 +839,7 @@ class InstalledPage(QWidget):
     def _recount(self):
         mods = self.mgr.lib.ordered()
         on = [m for m in mods if m.enabled]
-        self.rank = {m.uid: i + 1 for i, m in enumerate(on)}
+        self.rank = {m.uid: i + 1 for i, m in enumerate(mods)}
         self.count.setText(f"{len(on)} on, {len(mods) - len(on)} off" if mods else "")
         self._update_button()
         self.identify_btn.setVisible(any(m.source == "local" for m in mods))
@@ -844,16 +885,31 @@ class InstalledPage(QWidget):
             hay = f"{mod.name} {mod.author} {mod.category}".lower() if mod else ""
             item.setHidden(bool(text) and text not in hay)
         # reordering a filtered list would be confusing
-        self.list.setDragDropMode(QAbstractItemView.NoDragDrop if text else QAbstractItemView.InternalMove)
+        self.list.reorderable = not text
 
     def _uids(self) -> list[str]:
         return [self.list.item(i).data(ROLE_UID) for i in range(self.list.count())]
 
     # ------------------------------------------------------------ actions
-    def _reordered(self):
-        self.mgr.set_order(self._uids())
-        self._recount()
+    def _moved(self, uid: str, index: int):
+        self.mgr.move_to(uid, index)
+        self.reload()
         self.changed.emit()
+
+    def _drag_refused(self, uid: str):
+        mod = self.mgr.lib.mods.get(uid)
+        if mod and mod.locked:
+            self.status.emit(f"{mod.name} is locked at #{self.rank.get(uid)}. Unlock it to move it.")
+
+    def set_locked(self, uid: str, on: bool):
+        mod = self.mgr.lib.mods.get(uid)
+        if not mod:
+            return
+        self.mgr.set_locked(uid, on)
+        self.reload()
+        pos = self.rank.get(uid)
+        self.status.emit(f"{mod.name} is locked at #{pos}: it stays there when you move, add or remove "
+                         "other mods." if on else f"{mod.name} is unlocked.")
 
     def _item_changed(self, item):
         if self._building:
@@ -921,10 +977,8 @@ class InstalledPage(QWidget):
         if uid not in uids:
             return
         i = uids.index(uid)
-        uids.pop(i)
-        target = {"top": 0, "bottom": len(uids), "up": max(0, i - 1), "down": min(len(uids), i + 1)}[where]
-        uids.insert(target, uid)
-        self.mgr.set_order(uids)
+        target = {"top": 0, "bottom": len(uids) - 1, "up": i - 1, "down": i + 1}[where]
+        self.mgr.move_to(uid, max(0, target))
         self.reload()
         self.changed.emit()
 
@@ -962,10 +1016,15 @@ class InstalledPage(QWidget):
         menu = QMenu(self)
         menu.addAction("Turn off" if mod.enabled else "Turn on", lambda: self.toggle(uid))
         menu.addSeparator()
-        menu.addAction("Move to top", lambda: self.move(uid, "top"))
-        menu.addAction("Move up", lambda: self.move(uid, "up"))
-        menu.addAction("Move down", lambda: self.move(uid, "down"))
-        menu.addAction("Move to bottom", lambda: self.move(uid, "bottom"))
+        if mod.locked:
+            menu.addAction(f"Unlock from #{self.rank.get(uid)}", lambda: self.set_locked(uid, False))
+        else:
+            menu.addAction("Move to top", lambda: self.move(uid, "top"))
+            menu.addAction("Move up", lambda: self.move(uid, "up"))
+            menu.addAction("Move down", lambda: self.move(uid, "down"))
+            menu.addAction("Move to bottom", lambda: self.move(uid, "bottom"))
+            menu.addAction(f"Lock at #{self.rank.get(uid)}", lambda: self.set_locked(uid, True))
+        menu.addAction("Edit priority list…", lambda: self.priority_requested.emit())
         menu.addSeparator()
         if mod.update:
             menu.addAction("Update", lambda: self.update_requested.emit(uid))

@@ -72,9 +72,14 @@ To uninstall: `./uninstall.sh` (keeps your mod library) or `./uninstall.sh --pur
   one), sort, search, switch between mods and sounds, hide 18+, outdated or
   already-installed mods. Click an author's name to see everything they've made.
   Paste a GameBanana link to install it directly.
-- **Installed**: drag to set priority. **Higher in the list wins** when two mods
-  change the same file. Each mod shows whether it wins or gets overridden, and the
-  side panel lists the exact files. Tick boxes turn mods on and off.
+- **Installed**: drag to set priority, in the list or the grid. **#1 wins** when
+  two mods change the same file. Each mod shows whether it wins or gets
+  overridden, and the side panel lists the exact files. Tick boxes turn mods on
+  and off.
+- **Priority** (Installed → Priority…): the whole load order as one compact list.
+  Drag rows, use the move buttons or type the number a mod should have. **Lock** a
+  mod (there, in the side panel or by right-clicking it) to keep it at its number
+  while you reorder, install or remove everything else.
 - **Profiles**: save a setup (which mods are on plus their order) and switch in one
   click.
 - **Downloads**: a page listing every install and update with progress, cancel and
@@ -184,6 +189,7 @@ Code map:
 | `sapphire/importers.py` | Reads Deadlock Mod Manager and Grimoire data into an import plan |
 | `sapphire/core.py` | The manager: install, update, apply, profiles, import, identify |
 | `sapphire/updater.py` | Checks GitHub for a newer Sapphire and installs it in place |
+| `sapphire/patchnotes.py` | Patch notes on start-up, from the packaged CHANGELOG.md |
 | `sapphire/discord.py` | Discord Rich Presence over the local IPC socket |
 | `sapphire/ui/` | The Qt interface (`onboarding.py` is the first-run wizard, `theme.py` the themes) |
 

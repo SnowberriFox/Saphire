@@ -98,16 +98,10 @@ class SubmissionModel(QAbstractListModel):
         self.items = []
         self.endResetModel()
 
-    def extend(self, subs: list[Submission], sort_key=None):
+    def extend(self, subs: list[Submission]):
         known = {s.key for s in self.items}
         subs = [s for s in subs if s.key not in known]
         if not subs:
-            return
-        if sort_key is not None:
-            # Re-sort everything loaded so far (used for search, which the server won't sort).
-            self.beginResetModel()
-            self.items = sorted(self.items + subs, key=sort_key)
-            self.endResetModel()
             return
         self.beginInsertRows(QModelIndex(), len(self.items), len(self.items) + len(subs) - 1)
         self.items.extend(subs)
@@ -750,6 +744,17 @@ class FilterPanel(QWidget):
         it = self.tree.currentItem()
         return it.data(0, Qt.UserRole) if it else None
 
+    def category_matches(self, sub: Submission) -> bool:
+        """Whether a submission sits in the chosen category (used for favourites,
+        which are filtered here rather than by GameBanana)."""
+        it = self.tree.currentItem()
+        if not it or it.data(0, Qt.UserRole) is None:
+            return True
+        parent = it.parent()
+        if parent is None:
+            return sub.root_category == it.text(0)
+        return sub.root_category == parent.text(0) and sub.sub_category == it.text(0)
+
     def set_categories(self, cats: list[Category]):
         self.tree.blockSignals(True)
         self.tree.clear()
@@ -983,7 +988,14 @@ class BrowsePage(QWidget):
             from sapphire.gamebanana import Page
             text = self.filters.search.text().strip().lower()
             subs = [x for x in self.mgr.lib.favourite_submissions() if x.model == self.filters.model
-                    and (not text or text in x.name.lower() or text in x.author.lower())]
+                    and (not text or text in x.name.lower() or text in x.author.lower())
+                    and self.filters.category_matches(x)]
+            key = self.filters.sort.currentData()
+            order = {"popular": lambda s: -s.likes, "views": lambda s: -s.views,
+                     "downloads": lambda s: -(s.downloads or s.likes),
+                     "newest": lambda s: -s.date_added, "updated": lambda s: -s.date_modified}.get(key)
+            if order:
+                subs.sort(key=order)
             if self.submitter:
                 subs = [x for x in subs if x.author_id == self.submitter[0]]
             QTimer.singleShot(0, lambda t=token, n=len(subs): self._got_page(
@@ -1009,13 +1021,7 @@ class BrowsePage(QWidget):
             items = [s for s in items if not s.obsolete]
         if self.filters.hide_installed.isChecked():
             items = [s for s in items if not self.mgr.lib.by_gb(s.model, s.id)]
-        sort_key = None
-        if self.filters.search.text().strip():
-            key = self.filters.sort.currentData()
-            sort_key = {"popular": lambda s: -s.likes, "views": lambda s: -s.views,
-                        "downloads": lambda s: -(s.downloads or s.likes),
-                        "newest": lambda s: -s.date_added, "updated": lambda s: -s.date_modified}.get(key)
-        self.model.extend(items, sort_key)
+        self.model.extend(items)
         self._shown = len(self.model.items)
         self._complete = page.complete or raw_count == 0 or page.page * self.per_page >= page.total
         noun = "sounds" if self.filters.model == "Sound" else "mods"

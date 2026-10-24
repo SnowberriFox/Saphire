@@ -16,7 +16,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel,
                                QPushButton, QStackedWidget, QVBoxLayout, QWidget)
 
-from sapphire import APP_NAME, deploy, gameinfo, steam
+from sapphire import APP_NAME, deploy, gameinfo
 from sapphire.ui import theme
 from sapphire.ui.workers import run
 

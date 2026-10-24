@@ -467,6 +467,25 @@ class Manager:
             self.lib.save()
             self._dirty = True
 
+    def move_to(self, uid: str, slot: int) -> None:
+        """Move a mod to a load-order slot (0 = #1), around any locked mods."""
+        with self.lock:
+            self.lib.move_to(uid, slot)
+            self.lib.save()
+            self._dirty = True
+
+    def set_priority(self, order: list[str], locks: dict[str, int]) -> None:
+        """Save the whole order and every lock (the Priority dialog)."""
+        with self.lock:
+            self.lib.set_priority(order, locks)
+            self.lib.save()
+            self._dirty = True
+
+    def set_locked(self, uid: str, on: bool) -> None:
+        with self.lock:
+            self.lib.lock(uid, on)
+            self.lib.save()
+
     # ------------------------------------------------------------------- apply
     def apply(self, force: bool = False) -> deploy.DeployResult:
         """Make the game match the library. `force` rewrites every file even if it looks right."""
@@ -856,8 +875,7 @@ class Manager:
                 self._dirty = True
                 return
             old_uid, old_folder = mod.uid, mod.folder
-            self.lib.remove(old_uid)
-            mod.uid = new_uid
+            self.lib.replace_uid(old_uid, new_uid)   # keeps its place in the load order
             mod.source, mod.model, mod.gb_id = "gamebanana", match.model, match.gb_id
             mod.name = name or mod.name
             mod.author, mod.category, mod.thumb_url = author, category, thumb
@@ -867,9 +885,6 @@ class Manager:
             if old_folder.exists():
                 shutil.rmtree(mod.folder, ignore_errors=True)
                 old_folder.rename(mod.folder)
-            # keep its place in the load order
-            self.lib.mods[new_uid] = mod
-            self.lib.order.append(new_uid)
             for prof in self.lib.profiles.values():
                 prof.entries = [(new_uid if u == old_uid else u, e) for u, e in prof.entries]
             self.lib.save()

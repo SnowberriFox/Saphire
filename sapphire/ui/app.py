@@ -6,7 +6,6 @@ import logging
 import logging.handlers
 import os
 import sys
-import threading
 from pathlib import Path
 
 from PySide6.QtCore import QFileSystemWatcher, Qt, QTimer
@@ -31,7 +30,7 @@ from sapphire.ui.installed import InstalledPage
 from sapphire.discord import Presence
 from sapphire.ui.onboarding import OnboardingDialog
 from sapphire.ui.pages import ProfilesPage, SettingsPage
-from sapphire.updater import Updater, UpdateError, in_flatpak, restart, running_from_source
+from sapphire.updater import Updater, in_flatpak, restart, running_from_source
 from sapphire.ui.workers import JOB_POOL, NET_POOL, MainThreadCaller, run
 
 log = logging.getLogger("sapphire")
@@ -139,12 +138,14 @@ class MainWindow(QMainWindow):
         self.settings.setup_requested.connect(self.run_setup)
         self.settings.import_requested.connect(self.import_from)
         self.settings.app_update_requested.connect(lambda: self.check_app_update(manual=True))
+        self.settings.patch_notes_requested.connect(lambda: self.show_patch_notes())
         self.settings.appearance_changed.connect(self.apply_appearance)
         self.settings.discord_changed.connect(self.update_presence)
         self.installed.reapply_requested.connect(self.reapply)
         self.installed.refetch_requested.connect(self.refetch_mod)
         self.installed.rollback_requested.connect(self.roll_back)
         self.installed.status.connect(self.say)
+        self.installed.priority_requested.connect(self.edit_priority)
         self.browse.collection_requested.connect(self.open_collection)
         self.crosshair.status.connect(self.say)
         self.profiles.import_requested.connect(self.import_profile_file)
@@ -356,6 +357,8 @@ class MainWindow(QMainWindow):
         dlg = OnboardingDialog(self.mgr, self)
         dlg.import_requested.connect(self.import_from)
         finished = dlg.exec() == QDialog.Accepted
+        if first:
+            self._fresh_install = True     # no patch notes on top of the setup wizard
         if finished or first:
             # Skipping the first run still counts: nobody wants the wizard every launch.
             self.mgr.lib.settings.onboarded = True
@@ -378,6 +381,9 @@ class MainWindow(QMainWindow):
         if any(m.source == "gamebanana" for m in self.mgr.lib.mods.values()):
             QTimer.singleShot(1500, self.check_updates)
         QTimer.singleShot(4000, self.check_app_update)
+        if not getattr(self, "_notes_checked", False):
+            self._notes_checked = True
+            QTimer.singleShot(600, self._startup_patch_notes)
         self._app_update_timer = QTimer(self, interval=6 * 3600 * 1000)
         self._app_update_timer.timeout.connect(self.check_app_update)
         self._app_update_timer.start()
@@ -660,6 +666,29 @@ class MainWindow(QMainWindow):
         self._library_changed()
         self.request_apply()
         self.say(f"Rolled {m.name} back to {m.file_name}.")
+
+    def _startup_patch_notes(self):
+        from sapphire import patchnotes
+        s = self.mgr.lib.settings
+        seen = s.seen_version
+        show = patchnotes.should_show(s.patch_notes, seen, getattr(self, "_fresh_install", False))
+        if s.seen_version != __version__:
+            s.seen_version = __version__
+            self.mgr.lib.save()
+        if show:
+            self.show_patch_notes(seen)
+
+    def show_patch_notes(self, seen: str = ""):
+        from sapphire.ui.patchnotes import PatchNotesDialog
+        PatchNotesDialog(self, self.mgr, seen).exec()
+
+    def edit_priority(self):
+        from sapphire.ui.priority import PriorityDialog
+        dlg = PriorityDialog(self, self.mgr, select=self.installed.detail.uid)
+        if dlg.exec():
+            self.installed.reload()
+            self.request_apply()
+            self.say("Priority saved.")
 
     def open_collection(self, cid: int):
         from sapphire.ui.collection import CollectionDialog

@@ -68,6 +68,11 @@ class InstalledMod:
     audio_url: str = ""               # GameBanana's preview clip, for sound mods
     previous: dict | None = None      # the version before the last update, for roll back
     skip_file_id: int = 0             # rolled back from this file: auto-update leaves it alone
+    lock_at: int | None = None        # locked to this load-order slot (0 = #1); None = moves freely
+
+    @property
+    def locked(self) -> bool:
+        return self.lock_at is not None
 
     @property
     def folder(self) -> Path:
@@ -121,6 +126,8 @@ class Settings:
     one_skin_per_hero: bool = False  # turning a skin on turns the hero's other skins off
     helper: bool = False             # background helper that keeps gameinfo.gi patched
     favourites_only: bool = False    # Browse filter
+    patch_notes: str = "update"      # show patch notes: "update", "always" or "never"
+    seen_version: str = ""           # the version patch notes were last shown for
 
 
 class Library:
@@ -252,17 +259,55 @@ class Library:
             self.order.insert(0, mod.uid)
         else:
             self.order.append(mod.uid)
+        self._pin()
 
     def remove(self, uid: str) -> InstalledMod | None:
         mod = self.mods.pop(uid, None)
         if uid in self.order:
             self.order.remove(uid)
+        self._pin()
         return mod
+
+    def replace_uid(self, old: str, new: str) -> None:
+        """A mod got a new uid (identified as a GameBanana mod): same place in the order."""
+        mod = self.mods.pop(old)
+        mod.uid = new
+        self.mods[new] = mod
+        self.order = [new if u == old else u for u in self.order]
+        if new not in self.order:
+            self.order.append(new)
 
     def set_order(self, uids: list[str]) -> None:
         seen = [u for u in uids if u in self.mods]
         rest = [u for u in self.order if u not in seen]
         self.order = seen + rest
+        self._pin()
+
+    # ------------------------------------------------------------------ locking
+    def locks(self) -> dict[str, int]:
+        return {u: m.lock_at for u, m in self.mods.items() if m.lock_at is not None}
+
+    def _pin(self) -> None:
+        """Put locked mods back in their slots; everything else keeps its order around them."""
+        self.order = pin(self.order, self.locks())
+
+    def lock(self, uid: str, on: bool = True) -> None:
+        """Lock a mod to the slot it's in now (or unlock it)."""
+        self.mods[uid].lock_at = self.order.index(uid) if on else None
+
+    def move_to(self, uid: str, slot: int) -> None:
+        """Move one mod to a slot (0 = #1). Locked mods stay put; moving a locked
+        mod itself moves its lock."""
+        locks = self.locks()
+        self.order = move(self.order, locks, uid, slot)
+        for u, m in self.mods.items():
+            m.lock_at = locks.get(u)
+
+    def set_priority(self, order: list[str], locks: dict[str, int]) -> None:
+        """Replace the order and every lock at once (the Priority dialog's Save)."""
+        for u, m in self.mods.items():
+            m.lock_at = locks.get(u)
+        self.set_order(order)
 
     # ----------------------------------------------------------------- profiles
     def snapshot(self, name: str) -> Profile:
@@ -283,3 +328,39 @@ class Library:
         self.set_order(listed)
         self.active_profile = name
         return missing
+
+
+# ---------------------------------------------------------------------- locking
+# Pure helpers on (order, locks), so the Priority dialog can work on a draft
+# copy and only save when asked. locks maps uid -> slot (0 = #1).
+
+def pin(order: list[str], locks: dict[str, int]) -> list[str]:
+    """`order` with every locked mod moved back to its slot."""
+    locked = sorted((slot, u) for u, slot in locks.items() if u in order)
+    if not locked:
+        return list(order)
+    out = [u for u in order if u not in locks]
+    for slot, uid in locked:
+        out.insert(min(max(0, slot), len(out)), uid)
+    return out
+
+
+def move(order: list[str], locks: dict[str, int], uid: str, slot: int) -> list[str]:
+    """Move `uid` to `slot` without shifting any locked mod. A locked `uid` moves
+    its lock (swapping with a lock already in that slot). Updates `locks` in place."""
+    if uid not in order:
+        return list(order)
+    slot = max(0, min(slot, len(order) - 1))
+    if uid in locks:
+        other = next((u for u, s in locks.items() if s == slot and u != uid), None)
+        if other is not None:
+            locks[other] = locks[uid]
+        locks[uid] = slot
+        return pin(order, locks)
+    free = [u for u in order if u not in locks and u != uid]
+    locks_before = sum(1 for u, s in locks.items() if u in order and s < slot)
+    k = slot - locks_before
+    if order.index(uid) > slot and any(s == slot for u, s in locks.items() if u in order):
+        k -= 1   # moving up onto a locked slot: land just above the lock (below it when moving down)
+    free.insert(max(0, min(k, len(free))), uid)
+    return pin(free + [u for u in order if u in locks], locks)

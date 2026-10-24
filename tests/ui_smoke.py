@@ -189,6 +189,7 @@ def build_state(mgr: Manager):
             mod.audio_url = sub.audio_url
         mgr.lib.add(mod, top=False)
     mgr.lib.settings.onboarded = True
+    mgr.lib.settings.patch_notes = "never"   # opened explicitly further down
     mgr.lib.save()
     cfg = mgr.game_dir / "game/citadel/cfg"
     cfg.mkdir(parents=True, exist_ok=True)
@@ -278,7 +279,56 @@ def main():
 
     def installed_list():
         win.installed.view_group.button(1).setChecked(True)
-        QTimer.singleShot(800, lambda: (shot("3b-installed-list"), downloads()))
+        QTimer.singleShot(800, lambda: (shot("3b-installed-list"), priority()))
+
+    def priority():
+        # Row 25/26: lock one mod, then drag a card in the real grid with the mouse.
+        from PySide6.QtCore import QPoint
+        from PySide6.QtTest import QTest
+        page = win.installed
+        page.view_group.button(0).setChecked(True)
+        app.processEvents()
+        order = list(mgr.lib.order)
+        locked = order[2]
+        page.set_locked(locked, True)
+        app.processEvents()
+        lst, vp = page.list, page.list.viewport()
+        src = lst.visualItemRect(lst.item(5)).center()
+        r1 = lst.visualItemRect(lst.item(1))
+        dst = QPoint(r1.left() + 10, r1.center().y())
+        QTest.mousePress(vp, Qt.LeftButton, Qt.NoModifier, src)
+        for t in (0.1, 0.4, 0.8, 1.0):
+            QTest.mouseMove(vp, src + (dst - src) * t)
+            app.processEvents()
+        shot("3f-grid-dragging")
+        QTest.mouseRelease(vp, Qt.LeftButton, Qt.NoModifier, dst)
+        app.processEvents()
+        after = list(mgr.lib.order)
+        print("grid drag:", order[5] == after[1], "locked stays #3:", after[2] == locked,
+              "count kept:", len(after) == len(order) == lst.count())
+        lst.setCurrentRow(2)
+        QTimer.singleShot(600, lambda: (shot("3g-locked"), priority_dialog()))
+
+    def priority_dialog():
+        from sapphire.ui.priority import PriorityDialog
+        dlg = PriorityDialog(win, mgr, select=mgr.lib.order[2])
+        dlg.show()
+        app.processEvents()
+        dlg.grab().save(str(OUT / "15-priority.png"))
+        dlg.list.setCurrentRow(len(dlg.order) - 1)
+        dlg._step("top")
+        print("priority dialog: locked still #3:", dlg.order[2] == mgr.lib.order[2], "draft only:",
+              dlg.order != mgr.lib.order)
+        dlg.reject()
+        from sapphire.ui.patchnotes import PatchNotesDialog
+        notes = PatchNotesDialog(win, mgr, "1.5.0")
+        notes.show()
+        app.processEvents()
+        notes.grab().save(str(OUT / "16-patch-notes.png"))
+        notes.close()
+        mgr.set_locked(mgr.lib.order[2], False)
+        win.installed.reload()
+        downloads()
 
     def downloads():
         from sapphire.ui.downloads import Job

@@ -338,14 +338,14 @@ class GameBananaClient:
             params["_aFilters[Generic_Submitter]"] = submitter_id
         if sort in SORTS:
             params["_sSort"] = SORTS[sort][1]
-        search = (search or "").strip()
+        # Search goes through the same Index as browsing, as a name filter, so the
+        # chosen category, sort and submitter still apply (Util/Search/Results
+        # ignores all three). The filter value is "contains,<text>" and stops at
+        # the next comma, so commas become spaces.
+        search = " ".join((search or "").replace(",", " ").split())
         if search:
-            params.update({"_sSearchString": search, "_sModelName": model,
-                           "_aFilters[itemtype]": model})
-            path = "Util/Search/Results"
-        else:
-            path = f"{model}/Index"
-        data = self._get(path, params)
+            params["_aFilters[Generic_Name]"] = f"contains,{search}"
+        data = self._get(f"{model}/Index", params)
         records = data if isinstance(data, list) else data.get("_aRecords") or []
         meta = {} if isinstance(data, list) else data.get("_aMetadata") or {}
         items = []

@@ -184,7 +184,7 @@ def command() -> list[str]:
     """How to start the helper from outside this process."""
     flatpak = os.environ.get("FLATPAK_ID")
     if flatpak:
-        return ["flatpak", "run", f"--command=sapphire", flatpak, "--helper"]
+        return ["flatpak", "run", "--command=sapphire", flatpak, "--helper"]
     launcher = Path.home() / ".local" / "bin" / "sapphire"
     if launcher.is_file() and os.access(launcher, os.X_OK):
         return [str(launcher), "--helper"]

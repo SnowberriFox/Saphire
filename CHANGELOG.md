@@ -3,6 +3,38 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.7.0 — 2026-10-24
+
+### Added
+- **Priority list** (Installed → Priority…). Every mod in load order as one
+  compact list, top wins: drag rows, use Move to top / Up / Down / Move to bottom,
+  or type the number a mod should have. A find box jumps to a mod. Nothing changes
+  until you press Save.
+- **Lock a mod in place.** A locked mod keeps its number (#3 stays #3) while you
+  drag other mods, install new ones or remove old ones; everything else moves
+  around it. Lock from the Priority list, the side panel's new Load order section,
+  or by right-clicking a mod. Locked mods show a padlock.
+- **Patch notes when Sapphire opens.** After an update, Sapphire shows what
+  changed since the version you had (or every time it opens, or never: your
+  choice, at the bottom of the window). Settings → Sapphire → Patch notes opens
+  them any time.
+
+### Fixed
+- **Dragging cards in the Installed grid now reorders them.** Qt's own drag and
+  drop treats a grid as free-floating icons, so drops didn't change the order (and
+  on some setups lost the card). Sapphire now does the dragging itself in both
+  views, with a marker showing where the mod will land, and it no longer depends
+  on the desktop's drag and drop (which is flaky on some Wayland setups).
+- **Searching Browse keeps your filters.** A search now stays inside the chosen
+  category or hero and follows the sort order, instead of searching everything.
+  The "Only my favourites" view also respects the category and sort.
+- Identifying a hand-added mod kept its name but moved it to the bottom of the
+  load order; it now keeps its place.
+
+### Changed
+- Every mod shows its load-order number, including mods that are off (dimmed), so
+  the numbers don't jump around when you switch mods on and off.
+
 ## 1.6.0 — 2026-10-24
 
 ### Added
