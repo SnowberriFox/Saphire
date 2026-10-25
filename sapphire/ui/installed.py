@@ -70,20 +70,17 @@ class RowDelegate(QStyledItemDelegate):
         dim = not mod.enabled
         if self.page.list.drag_uid == uid:
             p.setOpacity(0.45)
-        # grip, or a padlock when the mod is locked to its slot
+        # check toggle where the style expects it (so clicks land on it). Styles
+        # differ: some put it a little way in, some (KDE's Breeze) right at the edge.
+        check = style.subElementRect(QStyle.SE_ItemViewItemCheckIndicator, opt, opt.widget)
+        cr = QRectF(check).adjusted(-1, -1, 1, 1)
         f = QFont(p.font())
         f.setPixelSize(theme.px(14))
         p.setFont(f)
-        if mod.locked:
-            s = theme.px(13)
-            draw_lock(p, QRectF(r.left() + 5, r.center().y() - s / 2, s, s), theme.ACCENT)
-        else:
+        if cr.left() - r.left() >= 18:
+            # room for the drag grip before the box
             p.setPen(QColor(theme.LINE))
             p.drawText(QRectF(r.left() + 4, r.top(), 14, r.height()), Qt.AlignCenter, "⠿")
-
-        # check toggle where the style expects it (so clicks land on it)
-        check = style.subElementRect(QStyle.SE_ItemViewItemCheckIndicator, opt, opt.widget)
-        cr = QRectF(check).adjusted(-1, -1, 1, 1)
         cp = QPainterPath()
         cp.addRoundedRect(cr, 4, 4)
         if mod.enabled:
@@ -98,16 +95,23 @@ class RowDelegate(QStyledItemDelegate):
             p.setPen(QPen(QColor(theme.LINE), 1.2))
             p.drawPath(cp)
 
-        x = cr.right() + 12
-        # load-order position (#1 wins clashes); dimmed for mods that are off
+        # padlock (locked mods) in its own slot after the box, then the load-order
+        # position (#1 wins clashes), dimmed for mods that are off
+        x = cr.right() + theme.px(8)
+        lock_w = theme.px(14)
+        if mod.locked:
+            s = theme.px(12)
+            draw_lock(p, QRectF(x + 1, r.center().y() - s / 2, s, s), theme.MUTED if dim else theme.ACCENT)
+        x += lock_w
         rank = self.page.rank.get(uid)
         f.setPixelSize(theme.px(13))
         f.setBold(True)
         p.setFont(f)
         p.setPen(QColor(theme.MUTED if dim else theme.ACCENT))
-        p.drawText(QRectF(x, r.top(), 30, r.height()), Qt.AlignVCenter | Qt.AlignRight,
+        num_w = theme.px(28)
+        p.drawText(QRectF(x, r.top(), num_w, r.height()), Qt.AlignVCenter | Qt.AlignRight,
                    f"{rank}" if rank else "–")
-        x += 40
+        x += num_w + theme.px(12)
 
         # thumbnail
         thumb = QRectF(x, r.top() + 7, theme.px(80), r.height() - 14)

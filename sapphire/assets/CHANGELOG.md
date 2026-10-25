@@ -3,6 +3,14 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.7.2 — 2026-10-25
+
+### Fixed
+- **The padlock on locked mods was hidden under the tick box** in List view on
+  desktops whose theme puts the tick box at the very edge of the row (KDE's, for
+  one). The padlock now has its own spot between the tick box and the mod's
+  number, wherever the theme puts the box.
+
 ## 1.7.1 — 2026-10-24
 
 ### Fixed
