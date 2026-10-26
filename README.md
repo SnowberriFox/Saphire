@@ -76,6 +76,10 @@ To uninstall: `./uninstall.sh` (keeps your mod library) or `./uninstall.sh --pur
   two mods change the same file. Each mod shows whether it wins or gets
   overridden, and the side panel lists the exact files. Tick boxes turn mods on
   and off.
+- **What a mod really changes**: the side panel lists the heroes a mod changes
+  (from its files, matched against the game's own hero list) and warns when a
+  mod changes a hero its title doesn't mention, like a sound mod that also
+  reskins someone.
 - **Priority** (Installed → Priority…): the whole load order as one compact list.
   Drag rows, use the move buttons or type the number a mod should have. **Lock** a
   mod (there, in the side panel or by right-clicking it) to keep it at its number
@@ -189,6 +193,7 @@ Code map:
 | `sapphire/importers.py` | Reads Deadlock Mod Manager and Grimoire data into an import plan |
 | `sapphire/core.py` | The manager: install, update, apply, profiles, import, identify |
 | `sapphire/updater.py` | Checks GitHub for a newer Sapphire and installs it in place |
+| `sapphire/heroes.py` | Which heroes a mod changes, from the game's hero list |
 | `sapphire/patchnotes.py` | Patch notes on start-up, from the packaged CHANGELOG.md |
 | `sapphire/discord.py` | Discord Rich Presence over the local IPC socket |
 | `sapphire/ui/` | The Qt interface (`onboarding.py` is the first-run wizard, `theme.py` the themes) |

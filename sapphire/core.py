@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable
 
-from sapphire import (archive, camera_fix, conflicts, deploy, gameinfo, identify, importers, paths,
+from sapphire import (archive, camera_fix, conflicts, deploy, gameinfo, heroes, identify, importers, paths,
                       steam)
 from sapphire.gamebanana import (Cancelled, GameBananaClient, GameBananaError, GBFile, newer_version,
                                  newest_file)
@@ -66,6 +66,8 @@ class Manager:
         self._first: list[tuple[str, str, Path]] = []   # overlay VPKs deployed ahead of the mods
         self.identifier = identify.Identifier(self.gb.session)
         self._dirty = False  # changes waiting to be applied (e.g. game was running)
+        self._heroes: heroes.HeroIndex | None = None
+        self._hero_memo: dict[str, tuple] = {}
 
     # ------------------------------------------------------------------ game dir
     @property
@@ -386,6 +388,40 @@ class Manager:
                     heroes.add(m.group(1))
         return heroes.pop() if len(heroes) == 1 else None
 
+    # ------------------------------------------------------- heroes a mod changes
+    def hero_index(self, refresh: bool = False) -> heroes.HeroIndex:
+        """The game's playable heroes and which files belong to each (see heroes.py)."""
+        if self._heroes is None or refresh:
+            try:
+                citadel = self.citadel() if self.game_dir else None
+            except Exception:  # noqa: BLE001 - no game: use the built-in list
+                citadel = None
+            self._heroes = heroes.HeroIndex.for_game(citadel, paths.cache_dir() / "heroes.json")
+            self._hero_memo.clear()
+        return self._heroes
+
+    def hero_changes(self, mod: InstalledMod) -> heroes.HeroChanges:
+        """Heroes this mod's files change (model, textures, portraits, menu scenes)."""
+        files = [mod.file_path(v.main) for v in mod.active_vpks]
+        sig = []
+        for f in files:
+            try:
+                st = f.stat()
+                sig.append((str(f), st.st_size, st.st_mtime_ns))
+            except OSError:
+                sig.append((str(f), 0, 0))
+        index = self.hero_index()
+        hit = self._hero_memo.get(mod.uid)
+        if hit and hit[0] == sig:
+            return hit[1]
+        changes = index.changes(e for f in files for e in self.vpk_index.entries(f))
+        self._hero_memo[mod.uid] = (sig, changes)
+        return changes
+
+    def hero_surprises(self, mod: InstalledMod) -> list[str]:
+        """Heroes the mod reskins without its title or category saying so."""
+        return heroes.surprises(self.hero_changes(mod), mod.name, mod.category, mod.model, self.hero_index())
+
     def skins_for(self, hero: str) -> list[InstalledMod]:
         return [m for m in self.lib.ordered() if self.hero_of(m) == hero]
 
@@ -495,6 +531,7 @@ class Manager:
                 raise GameRunning()
             citadel = self.citadel()
             self.import_unmanaged()
+            self.hero_index(refresh=True)
             self._first = self._camera_overlay(citadel)
             placements = deploy.plan(self.lib.ordered(), self._first)
             result, record = deploy.deploy(citadel, placements, self.lib.deployed, force=force)

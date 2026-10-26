@@ -3,6 +3,22 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.8.0 — 2026-10-26
+
+### Added
+- **See which heroes a mod really changes.** The side panel has a new "Heroes it
+  changes" section (model, textures, portraits, menu scenes), worked out from
+  the mod's files rather than its GameBanana title. Sapphire reads the hero list
+  from the game itself, so renamed heroes come out right (Vyper's portraits are
+  still filed under "kali", Abrams's under "bull") and new heroes work as soon as
+  the game has them.
+- **A heads-up when a mod changes a hero it doesn't mention:** an "Also changes
+  …" badge and a note in the side panel. This is what Ham's "profiles leak
+  into each other" report turned out to be: a sound mod ("Celeste Balatro Mult
+  Ult") that ships a whole Billy reskin, so Billy looked different whatever the
+  other mods said. Sapphire was deploying the profile correctly; the mod just
+  does more than its title says. Skins that don't name any hero aren't flagged.
+
 ## 1.7.2 — 2026-10-25
 
 ### Fixed

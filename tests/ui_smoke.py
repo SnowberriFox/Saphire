@@ -167,7 +167,9 @@ def build_state(mgr: Manager):
         (ALL[0], {"models/heroes/haze/haze.vmdl_c": b"a", "materials/haze/skin.vmat_c": b"a"}),
         (ALL[1], {"models/heroes/haze/haze.vmdl_c": b"b"}),
         (ALL[10], {"panorama/layout/hud.vxml_c": b"c", "panorama/images/hud/bar.vtex_c": b"c"}),
-        (ALL[12], {"sounds/orbs/pickup.vsnd_c": b"d"}),
+        # a sound pack that secretly carries a Billy reskin (Ham's report, 1.8.0)
+        (ALL[12], {"sounds/orbs/pickup.vsnd_c": b"d", "models/heroes_wip/punkgoat/punkgoat.vmdl_c": b"d",
+                   "models/heroes_wip/punkgoat/materials/body_basecolor_png_6fb0cefd.vtex_c": b"d"}),
         (ALL[4], {"models/heroes/infernus/infernus.vmdl_c": b"e"}),
         (ALL[13], {"sounds/orbs/pickup.vsnd_c": b"f", "sounds/ping.vsnd_c": b"f"}),
     ]
@@ -307,7 +309,17 @@ def main():
         print("grid drag:", order[5] == after[1], "locked stays #3:", after[2] == locked,
               "count kept:", len(after) == len(order) == lst.count())
         lst.setCurrentRow(2)
-        QTimer.singleShot(600, lambda: (shot("3g-locked"), priority_dialog()))
+        QTimer.singleShot(600, lambda: (shot("3g-locked"), hidden_reskin()))
+
+    def hidden_reskin():
+        page = win.installed
+        uid = ALL[12].key
+        print("hidden reskin flagged:", page.surprises.get(uid))
+        page.view_group.button(1).setChecked(True)
+        app.processEvents()
+        page.list.setCurrentRow(mgr.lib.order.index(uid))
+        QTimer.singleShot(600, lambda: (shot("3h-hidden-reskin"), page.view_group.button(0).setChecked(True),
+                                        priority_dialog()))
 
     def priority_dialog():
         from sapphire.ui.priority import PriorityDialog

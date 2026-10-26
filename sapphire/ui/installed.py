@@ -152,6 +152,10 @@ class RowDelegate(QStyledItemDelegate):
             badges.append(("Camera fixed", theme.OK_BG, theme.VERDIGRIS))
         elif mod.enabled and cam == "warning":
             badges.append(("Camera: check", theme.DANGER_BG, theme.DANGER_TEXT))
+        extra = self.page.surprises.get(uid)
+        if extra:
+            more = f" +{len(extra) - 1}" if len(extra) > 1 else ""
+            badges.append((f"Also changes {extra[0]}{more}", theme.DANGER_BG, theme.DANGER_TEXT))
         bf = QFont(p.font())
         bf.setPixelSize(theme.px(11))
         bf.setBold(True)
@@ -284,6 +288,9 @@ class RowDelegate(QStyledItemDelegate):
             badges.append(("Cam fixed", theme.OK_BG, theme.VERDIGRIS))
         elif mod.enabled and cam == "warning":
             badges.append(("Cam ?", theme.DANGER_BG, theme.DANGER_TEXT))
+        extra = self.page.surprises.get(uid)
+        if extra:
+            badges.append((f"Also: {extra[0]}" + ("…" if len(extra) > 1 else ""), theme.DANGER_BG, theme.DANGER_TEXT))
         bx = r.left() + theme.px(8)
         for text, bg, fg in badges:
             w = p.fontMetrics().horizontalAdvance(text) + theme.px(12)
@@ -405,6 +412,42 @@ class DetailPanel(QScrollArea):
             note.setObjectName("Muted")
             note.setWordWrap(True)
             self.lay.addWidget(note)
+
+    def _heroes(self, mod: InstalledMod):
+        try:
+            changes = self.page.mgr.hero_changes(mod)
+        except Exception:  # noqa: BLE001
+            return
+        if not changes.kinds:
+            return
+        h = QLabel("Heroes it changes")
+        h.setObjectName("SideTitle")
+        self.lay.addWidget(h)
+        looks = sorted(changes.reskinned)
+        art_only = sorted(set(changes.kinds) - set(looks))
+        lines = [f"{name}: {changes.describe(name)}" for name in looks]
+        if art_only:
+            if len(art_only) > 4:
+                lines.append(f"Portraits or menu art for {len(art_only)} heroes")
+            else:
+                lines += [f"{name}: {changes.describe(name)}" for name in art_only]
+        body = QLabel("\n".join(lines))
+        body.setObjectName("Muted")
+        body.setWordWrap(True)
+        body.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.lay.addWidget(body)
+        extra = self.page.surprises.get(mod.uid)
+        if extra:
+            who = " and ".join(extra) if len(extra) <= 2 else ", ".join(extra[:-1]) + f" and {extra[-1]}"
+            warn = QLabel(f"Heads up: this mod also changes how {who} look{'s' if len(extra) == 1 else ''} "
+                          "in game, though its title and category don't say so. If "
+                          f"{'that hero looks' if len(extra) == 1 else 'those heroes look'} different from what "
+                          "you expect, this mod is why.")
+            warn.setWordWrap(True)
+            warn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            warn.setStyleSheet(f"background: {theme.DANGER_BG}; color: {theme.DANGER_TEXT}; "
+                               "border-radius: 6px; padding: 8px;")
+            self.lay.addWidget(warn)
 
     def _variants_changed(self, uid: str):
         from sapphire.ui.dialogs import error
@@ -550,6 +593,7 @@ class DetailPanel(QScrollArea):
             self.lay.addWidget(u)
 
         self._load_order(mod)
+        self._heroes(mod)
 
         if len(mod.vpks) > 1 or (mod.source == "gamebanana" and mod.gb_id):
             h = QLabel("Variants")
@@ -694,6 +738,7 @@ class InstalledPage(QWidget):
         self.images = images
         self.conflicts: dict[str, ModConflicts] = {}
         self.rank: dict[str, int] = {}
+        self.surprises: dict[str, list[str]] = {}   # uid -> heroes it reskins without saying so
 
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -844,6 +889,14 @@ class InstalledPage(QWidget):
         mods = self.mgr.lib.ordered()
         on = [m for m in mods if m.enabled]
         self.rank = {m.uid: i + 1 for i, m in enumerate(mods)}
+        self.surprises = {}
+        for m in mods:
+            try:
+                extra = self.mgr.hero_surprises(m)
+            except Exception:  # noqa: BLE001 - a hint, never worth breaking the page
+                extra = []
+            if extra:
+                self.surprises[m.uid] = extra
         self.count.setText(f"{len(on)} on, {len(mods) - len(on)} off" if mods else "")
         self._update_button()
         self.identify_btn.setVisible(any(m.source == "local" for m in mods))
