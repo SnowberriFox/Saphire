@@ -84,7 +84,44 @@ DISPLAY_BOOST = 1.0    # ...and the wide title font the other way
 
 DISPLAY_FAMILY = "Josefin Sans"
 BODY_FAMILY = "Inter"
-FONTS = {"smooth": ("Josefin Sans", "Inter"), "pixel": ("Press Start 2P", "Pixelify Sans")}
+TEXT_FONT = TITLE_FONT = ""      # the person's choice in Settings ("" = the theme's)
+
+# Fonts that ship with Sapphire (all SIL Open Font License, texts in assets/).
+BUNDLED_FONTS: dict[str, list[str]] = {
+    "Inter": ["Inter-Regular.ttf", "Inter-Medium.ttf", "Inter-SemiBold.ttf", "Inter-Bold.ttf"],
+    "Josefin Sans": ["JosefinSans-SemiBold.ttf"],
+    "Chakra Petch": ["ChakraPetch-Regular.ttf", "ChakraPetch-SemiBold.ttf"],
+    "Atkinson Hyperlegible Mono": ["AtkinsonHyperlegibleMono.ttf"],
+    "Share Tech Mono": ["ShareTechMono-Regular.ttf"],
+    "Space Mono": ["SpaceMono-Regular.ttf", "SpaceMono-Bold.ttf"],
+    "Pixelify Sans": ["PixelifySans.ttf"],
+    "VT323": ["VT323-Regular.ttf"],
+    "Press Start 2P": ["PressStart2P-Regular.ttf"],
+}
+PIXEL_FAMILIES = {"Press Start 2P", "Pixelify Sans", "VT323"}   # drawn without anti-aliasing
+# Fonts that look small or large at the same pixel size get nudged so text
+# lines up whatever's picked.
+SIZE_ADJUST = {"Pixelify Sans": 1.18, "VT323": 1.4, "Press Start 2P": 0.7, "Space Mono": 0.94,
+               "Atkinson Hyperlegible Mono": 0.94, "Share Tech Mono": 1.06, "Chakra Petch": 1.04}
+
+# Each look's own fonts (first = what it uses unless you pick something else)
+# and the ones that suit it, offered first in Settings.
+RECOMMENDED: dict[str, dict[str, list[str]]] = {
+    "smooth": {"text": ["Inter", "Atkinson Hyperlegible Mono", "Chakra Petch"],
+               "titles": ["Josefin Sans", "Inter", "Chakra Petch"]},
+    "pixel": {"text": ["Chakra Petch", "Pixelify Sans", "Atkinson Hyperlegible Mono", "Share Tech Mono",
+                       "Space Mono", "VT323"],
+              "titles": ["Press Start 2P", "Pixelify Sans", "VT323", "Chakra Petch"]},
+}
+
+
+def look(preset: str | None = None) -> str:
+    return "pixel" if STYLES.get(preset or PRESET, {}).get("style") == "pixel" else "smooth"
+
+
+def recommended(kind: str, preset: str | None = None) -> list[str]:
+    """Fonts that suit a theme, for "text" or "titles"; the first is its default."""
+    return list(RECOMMENDED[look(preset)][kind])
 
 
 # ---------------------------------------------------------------- colour maths
@@ -124,9 +161,11 @@ def resolve(tokens: dict[str, str]) -> dict[str, str]:
     }
 
 
-def set_theme(preset: str | None = None, overrides: dict[str, str] | None = None) -> None:
+def set_theme(preset: str | None = None, overrides: dict[str, str] | None = None,
+              text_font: str | None = None, title_font: str | None = None) -> None:
     global BG, PANEL, RAISED, LINE, ACCENT, ACCENT_HI, ACCENT_LO, TEXT, MUTED, ON_ACCENT, HOVER, BANNER_BG, PRESET
     global PIXEL, BUTTON, SOUL, BAR_BG, ROUND, FONT_BOOST, DISPLAY_BOOST, DISPLAY_FAMILY, BODY_FAMILY, OVERRIDES
+    global TEXT_FONT, TITLE_FONT
     PRESET = preset if preset in PRESETS else DEFAULT_PRESET
     OVERRIDES = dict(overrides or {})
     base = dict(PRESETS[PRESET])
@@ -141,13 +180,18 @@ def set_theme(preset: str | None = None, overrides: dict[str, str] | None = None
     SOUL = style.get("soul", ACCENT)
     BAR_BG = style.get("bar_bg", RAISED)
     ROUND = 0.0 if PIXEL else 1.0
-    FONT_BOOST = 1.18 if PIXEL else 1.0
-    DISPLAY_BOOST = 0.7 if PIXEL else 1.0
     if PIXEL:
         # the accent is the "selected" yellow; selections and highlights use it directly
         ACCENT_HI = ACCENT_LO = ACCENT
         ON_ACCENT = "#000000"
-    DISPLAY_FAMILY, BODY_FAMILY = FONTS["pixel" if PIXEL else "smooth"]
+    if text_font is not None:
+        TEXT_FONT = text_font
+    if title_font is not None:
+        TITLE_FONT = title_font
+    BODY_FAMILY = TEXT_FONT or recommended("text")[0]
+    DISPLAY_FAMILY = TITLE_FONT or recommended("titles")[0]
+    FONT_BOOST = SIZE_ADJUST.get(BODY_FAMILY, 1.0)
+    DISPLAY_BOOST = SIZE_ADJUST.get(DISPLAY_FAMILY, 1.0)
 
 
 def current_tokens() -> dict[str, str]:
@@ -160,18 +204,28 @@ set_theme(DEFAULT_PRESET)
 # ---------------------------------------------------------------------- fonts
 
 def load_fonts() -> None:
-    """Register the bundled fonts (smooth and pixel sets)."""
-    def add(names: list[str], fallback: str) -> str:
-        family = ""
-        for name in names:
+    """Register the bundled fonts with Qt."""
+    for family, files in BUNDLED_FONTS.items():
+        for name in files:
             fid = QFontDatabase.addApplicationFont(str(ASSETS / name))
-            fams = QFontDatabase.applicationFontFamilies(fid) if fid >= 0 else []
-            family = family or (fams[0] if fams else "")
-        return family or fallback
-    display = add(["JosefinSans-SemiBold.ttf"], "sans-serif")
-    body = add(["Inter-Regular.ttf", "Inter-Medium.ttf", "Inter-SemiBold.ttf", "Inter-Bold.ttf"], "sans-serif")
-    FONTS["smooth"] = (display, body)
-    FONTS["pixel"] = (add(["PressStart2P-Regular.ttf"], "monospace"), add(["PixelifySans.ttf"], "monospace"))
+            if fid < 0:
+                continue
+            got = QFontDatabase.applicationFontFamilies(fid)
+            if got and got[0] != family:
+                # a font that names itself differently: remember its real name
+                log_name_mismatch(family, got[0])
+
+
+def log_name_mismatch(expected: str, actual: str) -> None:
+    import logging
+    logging.getLogger(__name__).warning("font %s registered as %r", expected, actual)
+
+
+def system_fonts() -> list[str]:
+    """Fonts installed on this computer (not the bundled ones), for Settings."""
+    bundled = set(BUNDLED_FONTS)
+    return sorted({f for f in QFontDatabase.families() if f not in bundled and not f.startswith(".")},
+                  key=str.lower)
 
 
 def px(n: float) -> int:
@@ -192,8 +246,8 @@ def rad(n: float) -> float:
 def display_font(size: int) -> QFont:
     f = QFont(DISPLAY_FAMILY)
     f.setPixelSize(px(size * DISPLAY_BOOST))
-    f.setWeight(QFont.Normal if PIXEL else QFont.DemiBold)
-    if PIXEL:
+    f.setWeight(QFont.Normal if DISPLAY_FAMILY in PIXEL_FAMILIES else QFont.DemiBold)
+    if DISPLAY_FAMILY in PIXEL_FAMILIES:
         f.setStyleStrategy(QFont.NoAntialias)
     return f
 
@@ -271,6 +325,11 @@ def draw_soul(p, rect) -> None:
 
 # ----------------------------------------------------------------- stylesheet
 
+def _dsz(n: int) -> int:
+    """A title font size, adjusted for the title font."""
+    return round(n * DISPLAY_BOOST)
+
+
 def build_stylesheet() -> str:
     sheet = f"""
 * {{ outline: none; }}
@@ -278,7 +337,7 @@ QWidget {{ background: {BG}; color: {TEXT}; font-family: "{BODY_FAMILY}"; font-s
 QToolTip {{ background: {RAISED}; color: {TEXT}; border: 1px solid {LINE}; padding: 4px 6px; }}
 
 #Header {{ background: {PANEL}; border-bottom: 1px solid {LINE}; }}
-#Wordmark {{ background: transparent; color: {ACCENT}; font-family: "{DISPLAY_FAMILY}"; font-size: 24px; font-weight: 600; padding-top: 4px; }}
+#Wordmark {{ background: transparent; color: {ACCENT}; font-family: "{DISPLAY_FAMILY}"; font-size:{_dsz(24)}px; font-weight: 600; padding-top: 4px; }}
 #NavButton {{ background: transparent; color: {MUTED}; border: none; padding: 8px 12px;
               font-size: 14px; border-bottom: 2px solid transparent; }}
 #NavButton:hover {{ color: {TEXT}; }}
@@ -296,11 +355,11 @@ QToolTip {{ background: {RAISED}; color: {TEXT}; border: 1px solid {LINE}; paddi
 #StatusPill[state="warn"] {{ color: {ACCENT_HI}; border-color: {ACCENT_LO}; }}
 #StatusPill[state="bad"] {{ color: {DANGER_TEXT}; border-color: {OXBLOOD}; }}
 
-#PageTitle {{ background: transparent; font-family: "{DISPLAY_FAMILY}"; font-size: 22px; font-weight: 600; color: {TEXT}; padding-top: 3px; }}
+#PageTitle {{ background: transparent; font-family: "{DISPLAY_FAMILY}"; font-size:{_dsz(22)}px; font-weight: 600; color: {TEXT}; padding-top: 3px; }}
 #SideTitle {{ background: transparent; color: {MUTED}; font-size: 12px; font-weight: 600; padding-top: 6px; }}
 #Muted {{ background: transparent; color: {MUTED}; }}
 #Panel, #FilterPanel, #DetailPanel {{ background: {PANEL}; }}
-#DetailTitle {{ background: transparent; font-family: "{DISPLAY_FAMILY}"; font-size: 20px; font-weight: 600; color: {TEXT}; padding-top: 3px; }}
+#DetailTitle {{ background: transparent; font-family: "{DISPLAY_FAMILY}"; font-size:{_dsz(20)}px; font-weight: 600; color: {TEXT}; padding-top: 3px; }}
 #Banner {{ background: {BANNER_BG}; color: {ACCENT_HI if not is_light(BG) else ACCENT_LO}; border: 1px solid {ACCENT_LO}; border-radius: 6px; padding: 8px 12px; }}
 #BannerBad {{ background: {mix(PANEL, OXBLOOD, 0.25)}; color: {DANGER_TEXT if not is_light(BG) else "#7A2E24"}; border: 1px solid {OXBLOOD}; border-radius: 6px; padding: 8px 12px; }}
 #Swatch {{ border: 1px solid {LINE}; border-radius: 5px; min-width: 44px; min-height: 24px; }}
@@ -357,8 +416,11 @@ QMessageBox {{ background: {PANEL}; }}
 """
     sheet = sheet.replace('"Josefin Sans"', f'"{DISPLAY_FAMILY}"').replace('"Inter"', f'"{BODY_FAMILY}"')
     sheet = sheet.replace("@CHECK@", (ASSETS / "check.svg").as_posix())
-    if PIXEL:
+    # Text sizes follow the text font ("font-size: 13px"); title sizes were
+    # already worked out for the title font ("font-size:24px", no space).
+    if FONT_BOOST != 1.0:
         sheet = re.sub(r"font-size: (\d+)px", lambda m: f"font-size: {round(int(m.group(1)) * FONT_BOOST)}px", sheet)
+    if PIXEL:
         sheet = re.sub(r"border-radius: \d+px", "border-radius: 0px", sheet)
         sheet += _pixel_sheet()
     if SCALE != 1.0:
@@ -369,12 +431,12 @@ QMessageBox {{ background: {PANEL}; }}
 def _pixel_sheet() -> str:
     """The boxy look, layered over the normal stylesheet: white box borders,
     orange buttons that turn yellow, an HP-bar progress bar."""
-    disp = lambda n: f"font-size: {round(n * DISPLAY_BOOST)}px"  # noqa: E731
+    weight = "normal" if DISPLAY_FAMILY in PIXEL_FAMILIES else "600"
     return f"""
 #Header {{ border-bottom: 3px solid {LINE}; }}
-#Wordmark {{ color: {TEXT}; {disp(24)}; font-weight: normal; padding-top: 6px; }}
-#PageTitle {{ {disp(22)}; font-weight: normal; padding-top: 6px; }}
-#DetailTitle {{ font-family: "{BODY_FAMILY}"; font-size: {round(20 * FONT_BOOST)}px; font-weight: 600; }}
+#Wordmark {{ color: {TEXT}; font-weight: {weight}; padding-top: 6px; }}
+#PageTitle {{ font-weight: {weight}; padding-top: 6px; }}
+#DetailTitle {{ font-family: "{BODY_FAMILY}"; font-size:{round(20 * FONT_BOOST)}px; font-weight: 600; }}
 #NavButton {{ color: {TEXT}; border-bottom: none; padding: 8px 10px; }}
 #NavButton:hover {{ color: {ACCENT}; }}
 #NavButton:checked {{ color: {ACCENT}; border-bottom: none; }}
@@ -418,7 +480,7 @@ _fonts_loaded = False
 
 
 def apply(app: QApplication, preset: str | None = None, overrides: dict[str, str] | None = None,
-          scale: float | None = None) -> None:
+          scale: float | None = None, text_font: str | None = None, title_font: str | None = None) -> None:
     """(Re)apply the theme. Safe to call again at runtime."""
     global SCALE, _fonts_loaded
     if not _fonts_loaded:
@@ -427,10 +489,10 @@ def apply(app: QApplication, preset: str | None = None, overrides: dict[str, str
         _fonts_loaded = True
     if scale is not None:
         SCALE = scale
-    set_theme(preset or PRESET, OVERRIDES if overrides is None else overrides)
+    set_theme(preset or PRESET, OVERRIDES if overrides is None else overrides, text_font, title_font)
     body = QFont(BODY_FAMILY)
     body.setPixelSize(fpx(13))
-    if PIXEL:
+    if BODY_FAMILY in PIXEL_FAMILIES:
         body.setStyleStrategy(QFont.NoAntialias)   # crisp pixel edges
     app.setFont(body)
     pal = QPalette()

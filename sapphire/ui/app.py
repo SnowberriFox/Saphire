@@ -462,7 +462,8 @@ class MainWindow(QMainWindow):
 
     def apply_appearance(self):
         st = self.mgr.lib.settings
-        theme.apply(QApplication.instance(), st.theme_preset, st.theme_colors, theme.SCALES.get(st.ui_scale, 1.0))
+        theme.apply(QApplication.instance(), st.theme_preset, st.theme_colors, theme.SCALES.get(st.ui_scale, 1.0),
+                    st.text_font, st.title_font)
         self._nav_souls()
         for page in (self.browse, self.installed):
             page.rescale()
@@ -1063,7 +1064,7 @@ def main(argv=None) -> int:
     app = QApplication(argv)
     manager = Manager()
     st = manager.lib.settings
-    theme.apply(app, st.theme_preset, st.theme_colors, theme.SCALES.get(st.ui_scale, 1.0))
+    theme.apply(app, st.theme_preset, st.theme_colors, theme.SCALES.get(st.ui_scale, 1.0), st.text_font, st.title_font)
     icon = Path(theme.ASSETS) / "sapphire.svg"
     app.setWindowIcon(QIcon(str(icon)))
     win = MainWindow(manager)

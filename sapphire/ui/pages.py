@@ -302,6 +302,23 @@ class SettingsPage(QWidget):
         ap.addWidget(self.reset_colors)
         ap.addStretch(1)
         root.addLayout(ap)
+        fonts = QHBoxLayout()
+        self.font_boxes: dict[str, QComboBox] = {}
+        for kind, label in (("text", "Text font"), ("titles", "Title font")):
+            fonts.addWidget(QLabel(label))
+            box = QComboBox()
+            box.setMaxVisibleItems(18)
+            box.setMinimumWidth(240)
+            box.currentIndexChanged.connect(lambda _i, k=kind: self._font_changed(k))
+            self.font_boxes[kind] = box
+            fonts.addWidget(box)
+            fonts.addSpacing(18)
+        fonts.addStretch(1)
+        root.addLayout(fonts)
+        font_hint = QLabel("Each theme suggests fonts that suit it; you can pick any font on your computer.")
+        font_hint.setObjectName("Muted")
+        root.addWidget(font_hint)
+        self._fill_font_boxes()
         swatch_hint = QLabel("Click a colour to change it. Changes apply straight away.")
         swatch_hint.setObjectName("Muted")
         root.addWidget(swatch_hint)
@@ -446,6 +463,60 @@ class SettingsPage(QWidget):
         self.mgr.lib.save()
         self.appearance_changed.emit()
         self._refresh_swatches()
+        self._fill_font_boxes()     # suggestions depend on the theme
+
+    _FONT_ATTR = {"text": "text_font", "titles": "title_font"}
+
+    def _fill_font_boxes(self):
+        from PySide6.QtGui import QFont, QStandardItemModel
+        st = self.mgr.lib.settings
+        preset = st.theme_preset if st.theme_preset in theme.PRESETS else theme.DEFAULT_PRESET
+        for kind, box in self.font_boxes.items():
+            current = getattr(st, self._FONT_ATTR[kind])
+            rec = theme.recommended(kind, preset)
+            box.blockSignals(True)
+            box.clear()
+            model = box.model()
+
+            def header(text):
+                box.addItem(text, None)
+                if isinstance(model, QStandardItemModel):
+                    item = model.item(box.count() - 1)
+                    item.setEnabled(False)
+                    f = QFont()
+                    f.setBold(True)
+                    item.setFont(f)
+
+            def add(family, label=None):
+                box.addItem(label or family, family)
+                box.setItemData(box.count() - 1, QFont(family), Qt.FontRole)   # shown in its own font
+
+            box.addItem(f"Theme's choice ({rec[0]})", "")
+            header(f"Suggested for {preset}")
+            for fam in rec:
+                add(fam)
+            others = [f for f in theme.BUNDLED_FONTS if f not in rec]
+            header("Also included with Sapphire")
+            for fam in others:
+                add(fam)
+            system = theme.system_fonts()
+            if system:
+                header("On this computer")
+                for fam in system:
+                    add(fam)
+            if current and box.findData(current) < 0:
+                add(current, f"{current} (not installed)")
+            box.setCurrentIndex(max(0, box.findData(current)))
+            box.blockSignals(False)
+
+    def _font_changed(self, kind: str):
+        box = self.font_boxes[kind]
+        family = box.currentData()
+        if family is None:          # a section heading
+            return
+        setattr(self.mgr.lib.settings, self._FONT_ATTR[kind], family)
+        self.mgr.lib.save()
+        self.appearance_changed.emit()
 
     def _reset_colors(self):
         self.mgr.lib.settings.theme_colors = {}

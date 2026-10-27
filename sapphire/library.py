@@ -119,6 +119,8 @@ class Settings:
     ui_scale: str = "Normal"         # see theme.SCALES
     theme_preset: str = "Sapphire"   # see theme.PRESETS
     theme_colors: dict = field(default_factory=dict)   # token -> hex overrides
+    text_font: str = ""              # font for text ("" = the theme's own); any installed family
+    title_font: str = ""             # font for titles ("" = the theme's own)
     installed_view: str = "grid"     # Installed page: "grid" or "list"
     discord_presence: bool = False
     discord_app_id: str = ""

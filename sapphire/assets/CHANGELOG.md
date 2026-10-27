@@ -3,6 +3,22 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.9.1 — 2026-10-28
+
+### Added
+- **Font settings** (Settings → Appearance → Text font / Title font), Ham's idea.
+  Each theme suggests fonts that suit it and you can pick any font on your
+  computer; the list shows each one in its own font. Sizes adjust per font, so
+  small pixel fonts and wide monospace ones still fit. Your choice sticks when
+  you switch themes ("Theme's choice" goes back to the theme's own).
+
+### Changed
+- **Undertale and Deltarune text is readable now.** Their text uses Chakra Petch
+  (angular, still game-y) by default instead of the pixel font; titles stay
+  pixel. Suggested alongside it: Pixelify Sans (the old look), Atkinson
+  Hyperlegible Mono, Share Tech Mono, Space Mono and VT323. All bundled and
+  open-licensed.
+
 ## 1.9.0 — 2026-10-28
 
 ### Added

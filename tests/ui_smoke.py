@@ -569,18 +569,25 @@ def main():
     def pixel_themes():
         # Ham's Undertale/Deltarune themes (1.9.0)
         st = mgr.lib.settings
-        shots = [("Undertale", 0, "17-undertale-browse"), ("Undertale", 1, "18-undertale-installed"),
-                 ("Undertale", 5, "19-undertale-settings"), ("Deltarune", 1, "20-deltarune-installed")]
+        shots = [("Undertale", 0, "17-undertale-browse", ""), ("Undertale", 1, "18-undertale-installed", ""),
+                 ("Undertale", 5, "19-undertale-settings", ""), ("Deltarune", 1, "20-deltarune-installed", ""),
+                 ("Undertale", 1, "21-undertale-share-tech-mono", "Share Tech Mono")]
 
         def step(i=0):
             if i == len(shots):
+                print("picked font in use:", theme.BODY_FAMILY, "| text font options:",
+                      win.settings.font_boxes["text"].count())
+                win.settings.font_boxes["text"].setCurrentIndex(0)
                 win.settings.preset_box.setCurrentText("Sapphire")
                 print("pixel themes: back to", theme.PRESET, "pixel:", theme.PIXEL, "font:", theme.BODY_FAMILY)
                 app.quit()
                 return
-            preset, page, name = shots[i]
+            preset, page, name, font = shots[i]
             if st.theme_preset != preset:
                 win.settings.preset_box.setCurrentText(preset)   # the way a person picks it
+            box = win.settings.font_boxes["text"]
+            if box.currentData() != font:
+                box.setCurrentIndex(box.findData(font))
             win.go(page)
             if page == 0:
                 win.browse.grid.setCurrentIndex(win.browse.model.index(1))
