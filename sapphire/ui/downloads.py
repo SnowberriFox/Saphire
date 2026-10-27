@@ -75,7 +75,7 @@ class JobRow(QFrame):
         super().__init__()
         self.job, self.jobs = job, jobs
         self.setObjectName("Panel")
-        self.setStyleSheet(f"#Panel {{ background: {theme.PANEL}; border-radius: 7px; }}")
+        self.setStyleSheet(f"#Panel {{ background: {theme.PANEL}; border-radius: {theme.rad(7):g}px; }}")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(14, 10, 14, 10)
         lay.setSpacing(6)

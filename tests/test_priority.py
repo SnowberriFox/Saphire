@@ -220,3 +220,26 @@ def test_updater_unpack_keeps_patch_notes(tmp_path):
             tf.add(root / rel, f"SnowberriFox-Saphire-abc123/{rel}")
     src = Updater._extract(tb, tmp_path / "src")
     assert (src / "sapphire/assets/CHANGELOG.md").stat().st_size > 1000
+
+
+def test_saves_from_several_threads_dont_collide():
+    # A background apply and a settings change used to share one temp file:
+    # whichever renamed it second crashed.
+    import threading
+    lib = lib_with("ABC")
+    errors = []
+
+    def hammer():
+        try:
+            for _ in range(40):
+                lib.save()
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+    threads = [threading.Thread(target=hammer) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert Library(lib.path).order == list("ABC")
+    assert not list(lib.path.parent.glob("*.tmp"))

@@ -116,7 +116,7 @@ class GameStep(Step):
         self.mgr = manager
         self.path = QLabel()
         self.path.setWordWrap(True)
-        self.path.setStyleSheet(f"background: {theme.RAISED}; border-radius: 5px; padding: 8px 10px;")
+        self.path.setStyleSheet(f"background: {theme.RAISED}; border-radius: {theme.rad(5):g}px; padding: 8px 10px;")
         self.lay.addWidget(self.path)
         self.lay.addWidget(self.status)
         row = QHBoxLayout()

@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QFileSystemWatcher, Qt, QTimer
+from PySide6.QtCore import QFileSystemWatcher, QSize, Qt, QTimer
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QDialog, QFileDialog, QHBoxLayout, QLabel,
@@ -190,6 +190,7 @@ class MainWindow(QMainWindow):
             self.nav_buttons.append(b)
             lay.addWidget(b)
         self.nav.idClicked.connect(self.go)
+        self._nav_souls()
         lay.addStretch(1)
         self.pill = QLabel()
         self.pill.setObjectName("StatusPill")
@@ -451,9 +452,18 @@ class MainWindow(QMainWindow):
         self.say("Reapplying every mod…")
         self.apply_now(force=True)
 
+    def _nav_souls(self):
+        """The pixel themes mark the current tab with a soul."""
+        icon = theme.soul_icon()
+        size = QSize(theme.px(13), theme.px(12)) if theme.PIXEL else QSize(0, 0)
+        for b in self.nav_buttons:
+            b.setIcon(icon)
+            b.setIconSize(size)
+
     def apply_appearance(self):
         st = self.mgr.lib.settings
         theme.apply(QApplication.instance(), st.theme_preset, st.theme_colors, theme.SCALES.get(st.ui_scale, 1.0))
+        self._nav_souls()
         for page in (self.browse, self.installed):
             page.rescale()
         self._refresh_nav()

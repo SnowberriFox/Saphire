@@ -65,7 +65,8 @@ To uninstall: `./uninstall.sh` (keeps your mod library) or `./uninstall.sh --pur
 - **First run**: a short setup wizard confirms the third-party content notice, finds
   Deadlock, offers to import mods you already have, and checks GameBanana is
   reachable. Run it again any time from Settings.
-- **Appearance**: Settings → Appearance has six colour themes, a colour picker for
+- **Appearance**: Settings → Appearance has eight themes (including Undertale and
+  Deltarune fan themes with pixel fonts and boxy menus), a colour picker for
   every part of the interface, and four interface sizes. Browse has a Grid/List
   toggle.
 - **Browse**: live GameBanana catalogue. Filter by category or hero (type to find
@@ -200,3 +201,10 @@ Code map:
 
 Data lives in `~/.local/share/sapphire` (`SAPPHIRE_HOME` overrides it, handy for
 testing). Set `SAPPHIRE_DEBUG=1` for verbose logs in the terminal.
+
+## Credits
+
+Fonts bundled under the SIL Open Font License (texts in `sapphire/assets`):
+Inter, Josefin Sans, Pixelify Sans and Press Start 2P. The Undertale and
+Deltarune themes are fan-made colour and style tributes; Sapphire isn't
+affiliated with Toby Fox or either game, and ships none of their assets.

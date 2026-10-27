@@ -564,10 +564,34 @@ def main():
     def finish():
         addons = sorted(p.name for p in (mgr.game_dir / "game/citadel/addons").iterdir())
         print("deployed after install:", addons)
-        app.quit()
+        pixel_themes()
+
+    def pixel_themes():
+        # Ham's Undertale/Deltarune themes (1.9.0)
+        st = mgr.lib.settings
+        shots = [("Undertale", 0, "17-undertale-browse"), ("Undertale", 1, "18-undertale-installed"),
+                 ("Undertale", 5, "19-undertale-settings"), ("Deltarune", 1, "20-deltarune-installed")]
+
+        def step(i=0):
+            if i == len(shots):
+                win.settings.preset_box.setCurrentText("Sapphire")
+                print("pixel themes: back to", theme.PRESET, "pixel:", theme.PIXEL, "font:", theme.BODY_FAMILY)
+                app.quit()
+                return
+            preset, page, name = shots[i]
+            if st.theme_preset != preset:
+                win.settings.preset_box.setCurrentText(preset)   # the way a person picks it
+            win.go(page)
+            if page == 0:
+                win.browse.grid.setCurrentIndex(win.browse.model.index(1))
+            if page == 1:
+                win.installed.view_group.button(1 if preset == "Deltarune" else 0).setChecked(True)
+                win.installed.list.setCurrentRow(1)
+            QTimer.singleShot(700, lambda: (shot(name), step(i + 1)))
+        step()
 
     QTimer.singleShot(1500, browse)
-    QTimer.singleShot(30000, app.quit)
+    QTimer.singleShot(45000, app.quit)
     app.exec()
 
 

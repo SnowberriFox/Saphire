@@ -37,7 +37,7 @@ class _Row(QStyledItemDelegate):
         if self.dlg.list.drag_uid == uid:
             p.setOpacity(0.45)
         bg = QPainterPath()
-        bg.addRoundedRect(r, 5, 5)
+        bg.addRoundedRect(r, theme.rad(5), theme.rad(5))
         p.fillPath(bg, QColor(theme.RAISED if selected else (theme.PANEL if index.row() % 2 == 0 else theme.BG)))
         if selected:
             p.setPen(QPen(QColor(theme.ACCENT_LO), 1.2))
@@ -49,26 +49,30 @@ class _Row(QStyledItemDelegate):
             draw_lock(p, QRectF(x, r.center().y() - s / 2, s, s), theme.ACCENT)
         else:
             f = QFont(p.font())
-            f.setPixelSize(theme.px(13))
+            f.setPixelSize(theme.fpx(13))
             p.setFont(f)
             p.setPen(QColor(theme.LINE))
             p.drawText(QRectF(x - 2, r.top(), s + 4, r.height()), Qt.AlignCenter, "⠿")
         x += s + theme.px(8)
         f = QFont(p.font())
-        f.setPixelSize(theme.px(13))
+        f.setPixelSize(theme.fpx(13))
         f.setBold(True)
         p.setFont(f)
         p.setPen(QColor(theme.ACCENT if mod.enabled else theme.MUTED))
         nw = theme.px(34)
         p.drawText(QRectF(x, r.top(), nw, r.height()), Qt.AlignVCenter | Qt.AlignRight, f"#{index.row() + 1}")
         x += nw + theme.px(12)
+        soul = theme.soul_space(selected)
+        if soul:
+            theme.soul_at(p, x, r.center().y())
+            x += soul
         tail = []
         if locked:
             tail.append("locked")
         if not mod.enabled:
             tail.append("off")
         f.setBold(False)
-        f.setPixelSize(theme.px(12))
+        f.setPixelSize(theme.fpx(12))
         p.setFont(f)
         tail_text = "  ·  ".join(tail)
         tw = p.fontMetrics().horizontalAdvance(tail_text) if tail_text else 0
@@ -77,12 +81,13 @@ class _Row(QStyledItemDelegate):
             p.drawText(QRectF(r.right() - tw - theme.px(10), r.top(), tw, r.height()),
                        Qt.AlignVCenter | Qt.AlignRight, tail_text)
         avail = r.right() - x - tw - theme.px(20)
-        f.setPixelSize(theme.px(13))
+        f.setPixelSize(theme.fpx(13))
         p.setFont(f)
         p.setPen(QColor(theme.TEXT if mod.enabled else theme.MUTED))
         name = mod.name + (f"   {mod.category}" if mod.category else "")
         p.drawText(QRectF(x, r.top(), avail, r.height()), Qt.AlignVCenter | Qt.AlignLeft,
                    p.fontMetrics().elidedText(name, Qt.ElideRight, int(avail)))
+        theme.pixel_frame(p, r, selected, bool(option.state & QStyle.State_MouseOver))
         p.restore()
 
 

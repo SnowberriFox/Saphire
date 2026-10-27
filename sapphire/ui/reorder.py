@@ -31,7 +31,7 @@ def draw_lock(p: QPainter, r: QRectF, color: str) -> None:
     p.drawLine(QPointF(shackle.left(), shackle.center().y()), QPointF(shackle.left(), body.top()))
     p.drawLine(QPointF(shackle.right(), shackle.center().y()), QPointF(shackle.right(), body.top()))
     path = QPainterPath()
-    path.addRoundedRect(body, w * 0.12, w * 0.12)
+    path.addRoundedRect(body, theme.rad(w * 0.12), theme.rad(w * 0.12))
     p.fillPath(path, QColor(color))
     p.restore()
 

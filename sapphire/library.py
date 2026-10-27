@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -181,7 +182,16 @@ class Library:
         fav = data.get("favourites") or {}
         self.favourites = {k: v for k, v in fav.items() if isinstance(v, dict)} if isinstance(fav, dict) else {}
 
+    _save_lock = threading.RLock()
+
     def save(self) -> None:
+        # Saves come from the UI and from background work (applying, installing):
+        # one at a time, each through its own temp file, so two can never trip
+        # over each other's half-written copy.
+        with self._save_lock:
+            self._save()
+
+    def _save(self) -> None:
         data = {
             "schema": SCHEMA,
             "game_dir": self.game_dir,
@@ -194,7 +204,7 @@ class Library:
             "deployed": self.deployed,
             "favourites": self.favourites,
         }
-        tmp = self.path.with_name(self.path.name + ".tmp")
+        tmp = self.path.with_name(f"{self.path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=1)
             fh.flush()

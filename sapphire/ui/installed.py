@@ -58,7 +58,7 @@ class RowDelegate(QStyledItemDelegate):
         selected = bool(option.state & QStyle.State_Selected)
         hovered = bool(option.state & QStyle.State_MouseOver)
         path = QPainterPath()
-        path.addRoundedRect(r, 7, 7)
+        path.addRoundedRect(r, theme.rad(7), theme.rad(7))
         p.fillPath(path, QColor(theme.RAISED if selected else theme.PANEL))
         if selected:
             p.setPen(QPen(QColor(theme.ACCENT_LO), 1.2))
@@ -75,14 +75,14 @@ class RowDelegate(QStyledItemDelegate):
         check = style.subElementRect(QStyle.SE_ItemViewItemCheckIndicator, opt, opt.widget)
         cr = QRectF(check).adjusted(-1, -1, 1, 1)
         f = QFont(p.font())
-        f.setPixelSize(theme.px(14))
+        f.setPixelSize(theme.fpx(14))
         p.setFont(f)
         if cr.left() - r.left() >= 18:
             # room for the drag grip before the box
             p.setPen(QColor(theme.LINE))
             p.drawText(QRectF(r.left() + 4, r.top(), 14, r.height()), Qt.AlignCenter, "⠿")
         cp = QPainterPath()
-        cp.addRoundedRect(cr, 4, 4)
+        cp.addRoundedRect(cr, theme.rad(4), theme.rad(4))
         if mod.enabled:
             p.fillPath(cp, QColor(theme.ACCENT))
             p.setPen(QPen(QColor(theme.ON_ACCENT), 2))
@@ -104,7 +104,7 @@ class RowDelegate(QStyledItemDelegate):
             draw_lock(p, QRectF(x + 1, r.center().y() - s / 2, s, s), theme.MUTED if dim else theme.ACCENT)
         x += lock_w
         rank = self.page.rank.get(uid)
-        f.setPixelSize(theme.px(13))
+        f.setPixelSize(theme.fpx(13))
         f.setBold(True)
         p.setFont(f)
         p.setPen(QColor(theme.MUTED if dim else theme.ACCENT))
@@ -116,7 +116,7 @@ class RowDelegate(QStyledItemDelegate):
         # thumbnail
         thumb = QRectF(x, r.top() + 7, theme.px(80), r.height() - 14)
         tp = QPainterPath()
-        tp.addRoundedRect(thumb, 5, 5)
+        tp.addRoundedRect(thumb, theme.rad(5), theme.rad(5))
         pix = self.page.images.get(mod.thumb_url) if mod.thumb_url else None
         p.save()
         p.setClipPath(tp)
@@ -157,7 +157,7 @@ class RowDelegate(QStyledItemDelegate):
             more = f" +{len(extra) - 1}" if len(extra) > 1 else ""
             badges.append((f"Also changes {extra[0]}{more}", theme.DANGER_BG, theme.DANGER_TEXT))
         bf = QFont(p.font())
-        bf.setPixelSize(theme.px(11))
+        bf.setPixelSize(theme.fpx(11))
         bf.setBold(True)
         p.setFont(bf)
         bx = r.right() - 10
@@ -165,22 +165,26 @@ class RowDelegate(QStyledItemDelegate):
             w = p.fontMetrics().horizontalAdvance(text) + 16
             br = QRectF(bx - w, r.center().y() - 11, w, 22)
             bp = QPainterPath()
-            bp.addRoundedRect(br, 11, 11)
+            bp.addRoundedRect(br, theme.rad(11), theme.rad(11))
             p.fillPath(bp, QColor(bg))
             p.setPen(QColor(fg))
             p.drawText(br, Qt.AlignCenter, text)
             bx -= w + 6
 
+        soul = theme.soul_space(selected)
+        if soul:
+            theme.soul_at(p, x, r.top() + 22)
+            x += soul
         text_w = bx - x - 10
         f = QFont(p.font())
-        f.setPixelSize(theme.px(14))
+        f.setPixelSize(theme.fpx(14))
         f.setBold(True)
         p.setFont(f)
         p.setPen(QColor(theme.MUTED if dim else theme.TEXT))
         p.drawText(QRectF(x, r.top() + 12, text_w, 20), Qt.AlignLeft | Qt.AlignVCenter,
                    p.fontMetrics().elidedText(mod.name, Qt.ElideRight, int(text_w)))
         f.setBold(False)
-        f.setPixelSize(theme.px(12))
+        f.setPixelSize(theme.fpx(12))
         p.setFont(f)
         p.setPen(QColor(theme.MUTED))
         bits = []
@@ -197,6 +201,7 @@ class RowDelegate(QStyledItemDelegate):
         sub = "    ".join(bits)
         p.drawText(QRectF(x, r.top() + 33, text_w, 18), Qt.AlignLeft | Qt.AlignVCenter,
                    p.fontMetrics().elidedText(sub, Qt.ElideRight, int(text_w)))
+        theme.pixel_frame(p, r, selected, hovered)
         p.restore()
 
 
@@ -210,7 +215,7 @@ class RowDelegate(QStyledItemDelegate):
         if self.page.list.drag_uid == uid:
             p.setOpacity(0.45)
         path = QPainterPath()
-        path.addRoundedRect(r, 8, 8)
+        path.addRoundedRect(r, theme.rad(8), theme.rad(8))
         p.fillPath(path, QColor(theme.PANEL))
         if selected or hovered:
             p.setPen(QPen(QColor(theme.ACCENT if selected else theme.ACCENT_LO), 1.5))
@@ -220,7 +225,7 @@ class RowDelegate(QStyledItemDelegate):
         p.save()
         clip = QPainterPath()
         clip.setFillRule(Qt.WindingFill)
-        clip.addRoundedRect(img, 8, 8)
+        clip.addRoundedRect(img, theme.rad(8), theme.rad(8))
         clip.addRect(QRectF(img.left(), img.top() + 10, img.width(), img_h - 10))
         p.setClipPath(clip.simplified())
         pix = self.page.images.get(mod.thumb_url) if mod.thumb_url else None
@@ -242,7 +247,7 @@ class RowDelegate(QStyledItemDelegate):
         # rank badge (top-left) and toggle (top-right)
         rank = self.page.rank.get(uid)
         bf = QFont(p.font())
-        bf.setPixelSize(theme.px(11))
+        bf.setPixelSize(theme.fpx(11))
         bf.setBold(True)
         p.setFont(bf)
         if rank:
@@ -251,7 +256,7 @@ class RowDelegate(QStyledItemDelegate):
             w = p.fontMetrics().horizontalAdvance(text) + theme.px(12) + lock_w
             br = QRectF(r.left() + theme.px(8), r.top() + theme.px(8), w, theme.px(20))
             bp = QPainterPath()
-            bp.addRoundedRect(br, theme.px(10), theme.px(10))
+            bp.addRoundedRect(br, theme.rad(theme.px(10)), theme.rad(theme.px(10)))
             fg = theme.ON_ACCENT if not dim else theme.MUTED
             p.fillPath(bp, QColor(theme.ACCENT if not dim else theme.BG))
             p.setPen(QColor(fg))
@@ -261,7 +266,7 @@ class RowDelegate(QStyledItemDelegate):
                 draw_lock(p, QRectF(br.left() + theme.px(7), br.center().y() - s / 2 - 0.5, s, s), fg)
         tr = self._toggle_rect(option.rect)
         tp = QPainterPath()
-        tp.addRoundedRect(tr, 5, 5)
+        tp.addRoundedRect(tr, theme.rad(5), theme.rad(5))
         if mod.enabled:
             p.fillPath(tp, QColor(theme.ACCENT))
             p.setPen(QPen(QColor(theme.ON_ACCENT), 2))
@@ -294,31 +299,37 @@ class RowDelegate(QStyledItemDelegate):
         bx = r.left() + theme.px(8)
         for text, bg, fg in badges:
             w = p.fontMetrics().horizontalAdvance(text) + theme.px(12)
+            if bx + w > r.right() - theme.px(8):
+                continue     # doesn't fit on the card
             br = QRectF(bx, img.bottom() - theme.px(26), w, theme.px(20))
             bp = QPainterPath()
-            bp.addRoundedRect(br, theme.px(10), theme.px(10))
+            bp.addRoundedRect(br, theme.rad(theme.px(10)), theme.rad(theme.px(10)))
             p.fillPath(bp, QColor(bg))
             p.setPen(QColor(fg))
             p.drawText(br, Qt.AlignCenter, text)
             bx += w + theme.px(6)
         # name + author
         f = QFont(p.font())
-        f.setPixelSize(theme.px(13))
+        f.setPixelSize(theme.fpx(13))
         f.setBold(True)
         p.setFont(f)
         p.setPen(QColor(theme.MUTED if dim else theme.TEXT))
-        tw = r.width() - theme.px(20)
-        p.drawText(QRectF(r.left() + theme.px(10), img.bottom() + theme.px(6), tw, theme.px(20)),
+        soul = theme.soul_space(selected)
+        if soul:
+            theme.soul_at(p, r.left() + theme.px(9), img.bottom() + theme.px(16))
+        tw = r.width() - theme.px(20) - soul
+        p.drawText(QRectF(r.left() + theme.px(10) + soul, img.bottom() + theme.px(6), tw, theme.px(20)),
                    Qt.AlignLeft | Qt.AlignVCenter, p.fontMetrics().elidedText(mod.name, Qt.ElideRight, int(tw)))
         f.setBold(False)
-        f.setPixelSize(theme.px(12))
+        f.setPixelSize(theme.fpx(12))
         p.setFont(f)
         p.setPen(QColor(theme.MUTED))
         sub = (f"by {mod.author}" if mod.author else ("Local file" if mod.source == "local" else "GameBanana"))
         if dim:
             sub += "    off"
-        p.drawText(QRectF(r.left() + theme.px(10), img.bottom() + theme.px(26), tw, theme.px(18)),
+        p.drawText(QRectF(r.left() + theme.px(10) + soul, img.bottom() + theme.px(26), tw, theme.px(18)),
                    Qt.AlignLeft | Qt.AlignVCenter, p.fontMetrics().elidedText(sub, Qt.ElideRight, int(tw)))
+        theme.pixel_frame(p, r, selected, hovered)
         p.restore()
 
 
@@ -446,7 +457,7 @@ class DetailPanel(QScrollArea):
             warn.setWordWrap(True)
             warn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
             warn.setStyleSheet(f"background: {theme.DANGER_BG}; color: {theme.DANGER_TEXT}; "
-                               "border-radius: 6px; padding: 8px;")
+                               f"border-radius: {theme.rad(6):g}px; padding: 8px;")
             self.lay.addWidget(warn)
 
     def _variants_changed(self, uid: str):
@@ -494,7 +505,7 @@ class DetailPanel(QScrollArea):
         if mod.thumb_url:
             img = QLabel()
             img.setAlignment(Qt.AlignCenter)
-            img.setStyleSheet(f"background: {theme.RAISED}; border-radius: 6px;")
+            img.setStyleSheet(f"background: {theme.RAISED}; border-radius: {theme.rad(6):g}px;")
             img.setMinimumHeight(theme.px(150))
             pix = self.page.images.get(mod.thumb_url)
             if pix is not None and not pix.isNull():
@@ -769,7 +780,7 @@ class InstalledPage(QWidget):
             b.setCheckable(True)
             b.setProperty("kind", "toggle")
             b.setProperty("mode", mode)
-            radius = "border-top-left-radius:5px;border-bottom-left-radius:5px;" if i == 0 else \
+            radius = "" if theme.PIXEL else "border-top-left-radius:5px;border-bottom-left-radius:5px;" if i == 0 else \
                 "border-top-right-radius:5px;border-bottom-right-radius:5px;"
             b.setStyleSheet(f"QPushButton {{ {radius} padding: 4px 12px; }}")
             self.view_group.addButton(b, i)

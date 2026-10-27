@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 from PySide6.QtWidgets import QApplication
 
@@ -41,8 +42,22 @@ PRESETS: dict[str, dict[str, str]] = {
                 "accent": "#D4705F", "text": "#F1E6E3", "muted": "#A8949A"},
     "Parchment": {"bg": "#F3EEE3", "panel": "#EAE3D4", "raised": "#DFD6C3", "line": "#C9BEA8",
                   "accent": "#2F5CAE", "text": "#2A2621", "muted": "#6E675D"},
+    # Fan themes: black boxes, thick white borders, pixel type, a red soul.
+    "Undertale": {"bg": "#000000", "panel": "#000000", "raised": "#0E0E0E", "line": "#FFFFFF",
+                  "accent": "#FFFF00", "text": "#FFFFFF", "muted": "#A8A8A8"},
+    "Deltarune": {"bg": "#0B0618", "panel": "#100A22", "raised": "#1C1336", "line": "#FFFFFF",
+                  "accent": "#FFFF00", "text": "#FFFFFF", "muted": "#ABA0D6"},
 }
 DEFAULT_PRESET = "Sapphire"
+
+# Presets that change more than colours. "pixel": square corners, white box
+# borders, pixel fonts, buttons in `button` that turn the accent colour when
+# you point at them, progress bars like an HP bar, and a `soul` heart marking
+# what's selected.
+STYLES: dict[str, dict[str, str]] = {
+    "Undertale": {"style": "pixel", "button": "#FF7F27", "soul": "#FF0000", "bar_bg": "#C00000"},
+    "Deltarune": {"style": "pixel", "button": "#FFA040", "soul": "#FF0000", "bar_bg": "#3B2466"},
+}
 
 SCALES: dict[str, float] = {"Small": 0.88, "Normal": 1.0, "Large": 1.15, "Huge": 1.3}
 SCALE = 1.0
@@ -58,9 +73,18 @@ OK_BG = "#1E3A2F"
 BG = PANEL = RAISED = LINE = ACCENT = ACCENT_HI = ACCENT_LO = TEXT = MUTED = ON_ACCENT = ""
 HOVER = BANNER_BG = ""
 PRESET = DEFAULT_PRESET
+OVERRIDES: dict[str, str] = {}
+
+# Current style (filled by set_theme)
+PIXEL = False          # the boxy pixel look
+BUTTON = SOUL = BAR_BG = ""
+ROUND = 1.0            # corner radius multiplier (0 = square)
+FONT_BOOST = 1.0       # pixel fonts read small: body text sizes are multiplied by this
+DISPLAY_BOOST = 1.0    # ...and the wide title font the other way
 
 DISPLAY_FAMILY = "Josefin Sans"
 BODY_FAMILY = "Inter"
+FONTS = {"smooth": ("Josefin Sans", "Inter"), "pixel": ("Press Start 2P", "Pixelify Sans")}
 
 
 # ---------------------------------------------------------------- colour maths
@@ -102,13 +126,28 @@ def resolve(tokens: dict[str, str]) -> dict[str, str]:
 
 def set_theme(preset: str | None = None, overrides: dict[str, str] | None = None) -> None:
     global BG, PANEL, RAISED, LINE, ACCENT, ACCENT_HI, ACCENT_LO, TEXT, MUTED, ON_ACCENT, HOVER, BANNER_BG, PRESET
+    global PIXEL, BUTTON, SOUL, BAR_BG, ROUND, FONT_BOOST, DISPLAY_BOOST, DISPLAY_FAMILY, BODY_FAMILY, OVERRIDES
     PRESET = preset if preset in PRESETS else DEFAULT_PRESET
+    OVERRIDES = dict(overrides or {})
     base = dict(PRESETS[PRESET])
     base.update(overrides or {})
     r = resolve(base)
     BG, PANEL, RAISED, LINE = r["bg"], r["panel"], r["raised"], r["line"]
     ACCENT, ACCENT_HI, ACCENT_LO = r["accent"], r["accent_hi"], r["accent_lo"]
     TEXT, MUTED, ON_ACCENT, HOVER, BANNER_BG = r["text"], r["muted"], r["on_accent"], r["hover"], r["banner_bg"]
+    style = STYLES.get(PRESET, {})
+    PIXEL = style.get("style") == "pixel"
+    BUTTON = style.get("button", ACCENT)
+    SOUL = style.get("soul", ACCENT)
+    BAR_BG = style.get("bar_bg", RAISED)
+    ROUND = 0.0 if PIXEL else 1.0
+    FONT_BOOST = 1.18 if PIXEL else 1.0
+    DISPLAY_BOOST = 0.7 if PIXEL else 1.0
+    if PIXEL:
+        # the accent is the "selected" yellow; selections and highlights use it directly
+        ACCENT_HI = ACCENT_LO = ACCENT
+        ON_ACCENT = "#000000"
+    DISPLAY_FAMILY, BODY_FAMILY = FONTS["pixel" if PIXEL else "smooth"]
 
 
 def current_tokens() -> dict[str, str]:
@@ -120,8 +159,8 @@ set_theme(DEFAULT_PRESET)
 
 # ---------------------------------------------------------------------- fonts
 
-def load_fonts() -> tuple[str, str]:
-    """Register the bundled fonts. Returns (display family, body family)."""
+def load_fonts() -> None:
+    """Register the bundled fonts (smooth and pixel sets)."""
     def add(names: list[str], fallback: str) -> str:
         family = ""
         for name in names:
@@ -131,7 +170,8 @@ def load_fonts() -> tuple[str, str]:
         return family or fallback
     display = add(["JosefinSans-SemiBold.ttf"], "sans-serif")
     body = add(["Inter-Regular.ttf", "Inter-Medium.ttf", "Inter-SemiBold.ttf", "Inter-Bold.ttf"], "sans-serif")
-    return display, body
+    FONTS["smooth"] = (display, body)
+    FONTS["pixel"] = (add(["PressStart2P-Regular.ttf"], "monospace"), add(["PixelifySans.ttf"], "monospace"))
 
 
 def px(n: float) -> int:
@@ -139,11 +179,94 @@ def px(n: float) -> int:
     return max(1, round(n * SCALE))
 
 
+def fpx(n: float) -> int:
+    """A body text size: scaled, and bigger for pixel fonts."""
+    return px(n * FONT_BOOST)
+
+
+def rad(n: float) -> float:
+    """A corner radius: 0 in the boxy themes."""
+    return n * ROUND
+
+
 def display_font(size: int) -> QFont:
     f = QFont(DISPLAY_FAMILY)
-    f.setPixelSize(px(size))
-    f.setWeight(QFont.DemiBold)
+    f.setPixelSize(px(size * DISPLAY_BOOST))
+    f.setWeight(QFont.Normal if PIXEL else QFont.DemiBold)
+    if PIXEL:
+        f.setStyleStrategy(QFont.NoAntialias)
     return f
+
+
+def soul_space(selected: bool) -> int:
+    """Room to leave before a selected item's name for the soul (0 when not drawn)."""
+    return px(16) if PIXEL and selected else 0
+
+
+def soul_at(p, x: float, center_y: float) -> None:
+    """Draw the soul just left of a name starting at x (call with soul_space room)."""
+    from PySide6.QtCore import QRectF
+    s = px(11)
+    draw_soul(p, QRectF(x, center_y - s / 2, s * 9 / 8, s))
+
+
+def soul_icon():
+    """A QIcon showing the soul only when its button is checked (nav tabs), or
+    an empty icon outside the pixel themes."""
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QIcon, QPainter, QPixmap
+    icon = QIcon()
+    if not PIXEL:
+        return icon
+    w, h = px(18) * 2, px(16) * 2          # drawn at 2x so it stays crisp on HiDPI
+    on = QPixmap(w, h)
+    on.fill(Qt.transparent)
+    painter = QPainter(on)
+    draw_soul(painter, QRectF(0, 0, w, h))
+    painter.end()
+    off = QPixmap(w, h)
+    off.fill(Qt.transparent)              # same size, so labels don't shift
+    icon.addPixmap(on, QIcon.Normal, QIcon.On)
+    icon.addPixmap(off, QIcon.Normal, QIcon.Off)
+    icon.addPixmap(on, QIcon.Active, QIcon.On)
+    icon.addPixmap(off, QIcon.Active, QIcon.Off)
+    return icon
+
+
+def pixel_frame(p, rect, selected: bool, hovered: bool) -> None:
+    """The box border around cards and rows in the pixel themes: dim, white
+    when pointed at, yellow when selected. Does nothing in the other themes."""
+    if not PIXEL:
+        return
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QPainter, QPen
+    p.save()
+    p.setRenderHint(QPainter.Antialiasing, False)
+    p.setOpacity(1.0)
+    color = ACCENT if selected else (LINE if hovered else mix(LINE, BG, 0.62))
+    pen = QPen(QColor(color), 2)
+    pen.setJoinStyle(Qt.MiterJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.NoBrush)
+    p.drawRect(QRectF(rect).adjusted(1, 1, -1, -1))
+    p.restore()
+
+
+def draw_soul(p, rect) -> None:
+    """The red pixel heart that marks what's selected in the pixel themes."""
+    from PySide6.QtCore import QRectF
+    p.save()
+    r = QRectF(rect)
+    cell = min(r.width() / 9, r.height() / 8)
+    ox, oy = r.left() + (r.width() - 9 * cell) / 2, r.top() + (r.height() - 8 * cell) / 2
+    rows = ("011000110", "111101111", "111111111", "111111111", "011111110", "001111100", "000111000", "000010000")
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(SOUL))
+    for y, row in enumerate(rows):
+        for x, on in enumerate(row):
+            if on == "1":
+                p.drawRect(QRectF(ox + x * cell, oy + y * cell, cell + 0.01, cell + 0.01))
+    p.restore()
 
 
 # ----------------------------------------------------------------- stylesheet
@@ -234,9 +357,61 @@ QMessageBox {{ background: {PANEL}; }}
 """
     sheet = sheet.replace('"Josefin Sans"', f'"{DISPLAY_FAMILY}"').replace('"Inter"', f'"{BODY_FAMILY}"')
     sheet = sheet.replace("@CHECK@", (ASSETS / "check.svg").as_posix())
+    if PIXEL:
+        sheet = re.sub(r"font-size: (\d+)px", lambda m: f"font-size: {round(int(m.group(1)) * FONT_BOOST)}px", sheet)
+        sheet = re.sub(r"border-radius: \d+px", "border-radius: 0px", sheet)
+        sheet += _pixel_sheet()
     if SCALE != 1.0:
         sheet = re.sub(r"(\d+)px", lambda m: f"{px(int(m.group(1)))}px", sheet)
     return sheet
+
+
+def _pixel_sheet() -> str:
+    """The boxy look, layered over the normal stylesheet: white box borders,
+    orange buttons that turn yellow, an HP-bar progress bar."""
+    disp = lambda n: f"font-size: {round(n * DISPLAY_BOOST)}px"  # noqa: E731
+    return f"""
+#Header {{ border-bottom: 3px solid {LINE}; }}
+#Wordmark {{ color: {TEXT}; {disp(24)}; font-weight: normal; padding-top: 6px; }}
+#PageTitle {{ {disp(22)}; font-weight: normal; padding-top: 6px; }}
+#DetailTitle {{ font-family: "{BODY_FAMILY}"; font-size: {round(20 * FONT_BOOST)}px; font-weight: 600; }}
+#NavButton {{ color: {TEXT}; border-bottom: none; padding: 8px 10px; }}
+#NavButton:hover {{ color: {ACCENT}; }}
+#NavButton:checked {{ color: {ACCENT}; border-bottom: none; }}
+#FilterPanel {{ border-right: 3px solid {LINE}; }}
+#DetailPanel {{ border-left: 3px solid {LINE}; }}
+#Panel {{ border: 2px solid {LINE}; }}
+#LaunchButton {{ background: {BG}; color: {BUTTON}; border: 2px solid {BUTTON}; }}
+#LaunchButton:hover {{ background: {BG}; color: {ACCENT}; border-color: {ACCENT}; }}
+#LaunchButton:pressed {{ background: {ACCENT}; color: #000000; }}
+#StatusPill {{ border: 2px solid {LINE}; }}
+#Banner, #BannerBad {{ border-width: 2px; }}
+QPushButton {{ background: {BG}; color: {BUTTON}; border: 2px solid {BUTTON}; padding: 6px 12px; }}
+QPushButton:hover, QPushButton:focus {{ color: {ACCENT}; border-color: {ACCENT}; }}
+QPushButton:pressed {{ background: {ACCENT}; color: #000000; }}
+QPushButton:disabled {{ color: {mix(BUTTON, BG, 0.55)}; border-color: {mix(BUTTON, BG, 0.55)}; }}
+QPushButton[kind="primary"] {{ background: {BUTTON}; color: #000000; border: 2px solid {BUTTON}; }}
+QPushButton[kind="primary"]:hover {{ background: {ACCENT}; border-color: {ACCENT}; }}
+QPushButton[kind="primary"]:disabled {{ background: {BG}; color: {MUTED}; border-color: {MUTED}; }}
+QPushButton[kind="danger"] {{ color: {DANGER_TEXT}; border-color: {DANGER_TEXT}; }}
+QPushButton[kind="toggle"]:checked {{ background: {ACCENT}; color: #000000; border-color: {ACCENT}; }}
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{ background: {BG}; border: 2px solid {LINE}; }}
+QLineEdit:focus, QComboBox:focus {{ border-color: {ACCENT}; }}
+QComboBox QAbstractItemView {{ background: {BG}; border: 2px solid {LINE}; selection-background-color: {BG}; selection-color: {ACCENT}; }}
+QCheckBox::indicator {{ border: 2px solid {LINE}; background: {BG}; }}
+QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
+QTreeView::item:selected, QListWidget::item:selected {{ background: {BG}; color: {ACCENT}; }}
+QScrollBar:vertical {{ width: 12px; }}
+QScrollBar::handle:vertical {{ background: {LINE}; border-radius: 0px; }}
+QProgressBar {{ background: {BAR_BG}; height: 10px; }}
+QProgressBar::chunk {{ background: {ACCENT}; }}
+QStatusBar {{ border-top: 3px solid {LINE}; }}
+QMenu {{ background: {BG}; border: 2px solid {LINE}; }}
+QMenu::item:selected {{ background: {BG}; color: {ACCENT}; }}
+QToolTip {{ background: {BG}; border: 2px solid {LINE}; }}
+QDialog, QMessageBox {{ background: {BG}; }}
+QTextBrowser {{ border: 2px solid {LINE}; }}
+"""
 
 
 _fonts_loaded = False
@@ -245,17 +420,18 @@ _fonts_loaded = False
 def apply(app: QApplication, preset: str | None = None, overrides: dict[str, str] | None = None,
           scale: float | None = None) -> None:
     """(Re)apply the theme. Safe to call again at runtime."""
-    global DISPLAY_FAMILY, BODY_FAMILY, SCALE, _fonts_loaded
+    global SCALE, _fonts_loaded
     if not _fonts_loaded:
-        DISPLAY_FAMILY, BODY_FAMILY = load_fonts()
+        load_fonts()
         app.setStyle("Fusion")
         _fonts_loaded = True
     if scale is not None:
         SCALE = scale
-    if preset is not None or overrides is not None:
-        set_theme(preset or PRESET, overrides)
+    set_theme(preset or PRESET, OVERRIDES if overrides is None else overrides)
     body = QFont(BODY_FAMILY)
-    body.setPixelSize(px(13))
+    body.setPixelSize(fpx(13))
+    if PIXEL:
+        body.setStyleStrategy(QFont.NoAntialias)   # crisp pixel edges
     app.setFont(body)
     pal = QPalette()
     for role, color in (

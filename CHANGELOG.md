@@ -3,6 +3,23 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.9.0 — 2026-10-28
+
+### Added
+- **Undertale and Deltarune themes** (Settings → Appearance → Theme), for Ham.
+  Not just colours: black boxes with thick white borders, pixel fonts (Pixelify
+  Sans for text, Press Start 2P for titles), orange buttons that turn yellow
+  when you point at them, square corners everywhere, progress bars that look
+  like an HP bar, and a red soul ❤ next to whatever's selected: the current
+  tab, the selected card or row. Deltarune is the purple Dark World version.
+  The fonts are open-licensed; nothing from the games themselves is included.
+
+### Fixed
+- Two saves of Sapphire's state at the same moment (say, a background apply
+  and a settings change) could make one of them fail. Saves now take turns.
+- The Mods/Sounds switch in Browse kept Sapphire's blue after changing theme.
+- Badges that don't fit on a card are left off instead of running past its edge.
+
 ## 1.8.0 — 2026-10-26
 
 ### Added

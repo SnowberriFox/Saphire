@@ -55,7 +55,7 @@ class Preview(QWidget):
         r = QRectF(self.rect())
         p.save()
         clip = QPainterPath()
-        clip.addRoundedRect(r, 8, 8)
+        clip.addRoundedRect(r, theme.rad(8), theme.rad(8))
         p.setClipPath(clip)
         self._bg(p, r)
         z = self.zoom
@@ -100,7 +100,7 @@ class Preview(QWidget):
         p.restore()
         p.setPen(QColor(255, 255, 255, 150))
         f = QFont(p.font())
-        f.setPixelSize(theme.px(11))
+        f.setPixelSize(theme.fpx(11))
         p.setFont(f)
         p.drawText(r.adjusted(10, 0, -10, -8), Qt.AlignBottom | Qt.AlignRight,
                    f"approximate preview, {self.zoom:g}× size")

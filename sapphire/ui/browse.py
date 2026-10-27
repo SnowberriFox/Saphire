@@ -139,7 +139,7 @@ class CardDelegate(QStyledItemDelegate):
         selected = bool(option.state & QStyle.State_Selected)
         hovered = bool(option.state & QStyle.State_MouseOver)
         path = QPainterPath()
-        path.addRoundedRect(r, 8, 8)
+        path.addRoundedRect(r, theme.rad(8), theme.rad(8))
         p.fillPath(path, QColor(theme.PANEL))
         if selected or hovered:
             p.setPen(QPen(QColor(theme.ACCENT if selected else theme.ACCENT_LO), 1.5))
@@ -150,7 +150,7 @@ class CardDelegate(QStyledItemDelegate):
         p.save()
         clip = QPainterPath()
         clip.setFillRule(Qt.WindingFill)
-        clip.addRoundedRect(img_rect, 8, 8)
+        clip.addRoundedRect(img_rect, theme.rad(8), theme.rad(8))
         clip.addRect(QRectF(img_rect.left(), img_rect.top() + 10, img_rect.width(), img_h - 10))
         p.setClipPath(clip.simplified())
         pix = self.images.get(sub.thumb_url)
@@ -169,12 +169,16 @@ class CardDelegate(QStyledItemDelegate):
             p.drawText(img_rect, Qt.AlignCenter, (sub.name[:1] or "?").upper())
         p.restore()
 
-        self._badges(p, sub, img_rect.left() + theme.px(8), img_rect.top() + theme.px(8))
+        self._badges(p, sub, img_rect.left() + theme.px(8), img_rect.top() + theme.px(8), img_rect.right() - theme.px(8))
 
-        # text
-        text_rect = QRectF(r.left() + theme.px(10), img_rect.bottom() + theme.px(8), r.width() - theme.px(20), theme.px(38))
+        # text (the soul sits before a selected card's name in the pixel themes)
+        soul = theme.soul_space(selected)
+        text_rect = QRectF(r.left() + theme.px(10) + soul, img_rect.bottom() + theme.px(8),
+                           r.width() - theme.px(20) - soul, theme.px(38))
+        if soul:
+            theme.soul_at(p, r.left() + theme.px(9), text_rect.top() + theme.px(9))
         f = QFont(p.font())
-        f.setPixelSize(theme.px(13))
+        f.setPixelSize(theme.fpx(13))
         f.setBold(True)
         p.setFont(f)
         p.setPen(QColor(theme.TEXT))
@@ -200,7 +204,7 @@ class CardDelegate(QStyledItemDelegate):
                        Qt.AlignLeft | Qt.AlignVCenter, line)
 
         f.setBold(False)
-        f.setPixelSize(theme.px(12))
+        f.setPixelSize(theme.fpx(12))
         p.setFont(f)
         p.setPen(QColor(theme.MUTED))
         meta_rect = QRectF(r.left() + theme.px(10), r.bottom() - theme.px(24), r.width() - theme.px(20), theme.px(18))
@@ -210,10 +214,12 @@ class CardDelegate(QStyledItemDelegate):
                    p.fontMetrics().elidedText(sub.author or "unknown", Qt.ElideRight,
                                               int(meta_rect.width() - lw - 10)))
         p.drawText(meta_rect, Qt.AlignRight | Qt.AlignVCenter, likes)
+        theme.pixel_frame(p, r, selected, hovered)
         p.restore()
 
-    def _badges(self, p: QPainter, sub: Submission, bx: float, by: float) -> float:
-        """Draw the status badges starting at (bx, by); returns the x after the last one."""
+    def _badges(self, p: QPainter, sub: Submission, bx: float, by: float, limit: float | None = None) -> float:
+        """Draw the status badges starting at (bx, by), skipping any that would
+        run past `limit`; returns the x after the last one."""
         state = self.installed_fn(sub)
         for text, bg, fg in (
             ("Update ready", theme.ACCENT, theme.ON_ACCENT) if state == "update" else
@@ -226,13 +232,15 @@ class CardDelegate(QStyledItemDelegate):
             if not text:
                 continue
             f = QFont(p.font())
-            f.setPixelSize(theme.px(11))
+            f.setPixelSize(theme.fpx(11))
             f.setBold(True)
             p.setFont(f)
             w = p.fontMetrics().horizontalAdvance(text) + theme.px(14)
+            if limit is not None and bx + w > limit:
+                continue
             badge = QRectF(bx, by, w, theme.px(20))
             bp = QPainterPath()
-            bp.addRoundedRect(badge, theme.px(10), theme.px(10))
+            bp.addRoundedRect(badge, theme.rad(theme.px(10)), theme.rad(theme.px(10)))
             p.fillPath(bp, QColor(bg))
             p.setPen(QColor(fg))
             p.drawText(badge, Qt.AlignCenter, text)
@@ -246,14 +254,14 @@ class CardDelegate(QStyledItemDelegate):
         selected = bool(option.state & QStyle.State_Selected)
         hovered = bool(option.state & QStyle.State_MouseOver)
         path = QPainterPath()
-        path.addRoundedRect(r, 7, 7)
+        path.addRoundedRect(r, theme.rad(7), theme.rad(7))
         p.fillPath(path, QColor(theme.RAISED if selected else theme.PANEL))
         if selected or hovered:
             p.setPen(QPen(QColor(theme.ACCENT_LO if selected else theme.LINE), 1.2))
             p.drawPath(path)
         thumb = QRectF(r.left() + theme.px(8), r.top() + theme.px(6), theme.px(96), r.height() - theme.px(12))
         tp = QPainterPath()
-        tp.addRoundedRect(thumb, 5, 5)
+        tp.addRoundedRect(thumb, theme.rad(5), theme.rad(5))
         pix = self.images.get(sub.thumb_url)
         p.save()
         p.setClipPath(tp)
@@ -271,21 +279,25 @@ class CardDelegate(QStyledItemDelegate):
         p.restore()
         x = thumb.right() + theme.px(12)
         f = QFont(p.font())
-        f.setPixelSize(theme.px(12))
+        f.setPixelSize(theme.fpx(12))
         p.setFont(f)
         p.setPen(QColor(theme.MUTED))
         right = f"♥ {fmt_count(sub.likes)}    {fmt_count(sub.views)} views    {fmt_date(sub.date_modified)}"
         rw = p.fontMetrics().horizontalAdvance(right)
         p.drawText(QRectF(r.right() - rw - theme.px(12), r.top(), rw, r.height()), Qt.AlignVCenter | Qt.AlignRight, right)
+        soul = theme.soul_space(selected)
+        if soul:
+            theme.soul_at(p, x, r.top() + theme.px(18))
+            x += soul
         text_w = r.right() - rw - theme.px(24) - x
-        f.setPixelSize(theme.px(14))
+        f.setPixelSize(theme.fpx(14))
         f.setBold(True)
         p.setFont(f)
         p.setPen(QColor(theme.TEXT))
         p.drawText(QRectF(x, r.top() + theme.px(8), text_w, theme.px(20)), Qt.AlignLeft | Qt.AlignVCenter,
                    p.fontMetrics().elidedText(sub.name, Qt.ElideRight, int(text_w)))
         f.setBold(False)
-        f.setPixelSize(theme.px(12))
+        f.setPixelSize(theme.fpx(12))
         p.setFont(f)
         p.setPen(QColor(theme.MUTED))
         meta = f"by {sub.author or 'unknown'}    {sub.category_label}" if sub.category_label else f"by {sub.author or 'unknown'}"
@@ -293,6 +305,7 @@ class CardDelegate(QStyledItemDelegate):
         mw = p.fontMetrics().horizontalAdvance(meta)
         p.drawText(QRectF(x, r.top() + theme.px(30), text_w, theme.px(18)), Qt.AlignLeft | Qt.AlignVCenter, meta)
         self._badges(p, sub, x + mw + theme.px(14), r.top() + theme.px(29))
+        theme.pixel_frame(p, r, selected, hovered)
         p.restore()
 
 
@@ -362,7 +375,7 @@ class FileRow(QFrame):
     def __init__(self, f: GBFile, state: str, primary: bool, installed_name: str = ""):
         super().__init__()
         self.setObjectName("Panel")
-        self.setStyleSheet(f"#Panel {{ background: {theme.RAISED}; border-radius: 6px; }}")
+        self.setStyleSheet(f"#Panel {{ background: {theme.RAISED}; border-radius: {theme.rad(6):g}px; }}")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 8, 10, 8)
         lay.setSpacing(4)
@@ -500,7 +513,7 @@ class DetailPane(QScrollArea):
         img = QLabel()
         img.setAlignment(Qt.AlignCenter)
         img.setMinimumHeight(170)
-        img.setStyleSheet(f"background: {theme.RAISED}; border-radius: 6px;")
+        img.setStyleSheet(f"background: {theme.RAISED}; border-radius: {theme.rad(6):g}px;")
         url = self._current_image_url()
         pix = self.images.get(url) if url else None
         if pix is not None:
@@ -663,10 +676,10 @@ class FilterPanel(QWidget):
             b = QPushButton(label)
             b.setCheckable(True)
             b.setProperty("model", model)
-            radius = "border-top-left-radius:5px;border-bottom-left-radius:5px;" if i == 0 else \
+            radius = "" if theme.PIXEL else "border-top-left-radius:5px;border-bottom-left-radius:5px;" if i == 0 else \
                 "border-top-right-radius:5px;border-bottom-right-radius:5px;"
-            b.setStyleSheet(f"QPushButton {{ border-radius: 0; {radius} }}"
-                            f"QPushButton:checked {{ background: {theme.ACCENT_LO}; color: {theme.TEXT}; border-color: {theme.ACCENT_LO}; }}")
+            b.setProperty("kind", "toggle")     # coloured by the theme's stylesheet, so it follows theme changes
+            b.setStyleSheet(f"QPushButton {{ border-radius: 0; {radius} }}")
             self.type_group.addButton(b, i)
             type_row.addWidget(b)
         self.type_group.button(0).setChecked(True)
@@ -823,7 +836,7 @@ class BrowsePage(QWidget):
         top.addWidget(self.result_label)
         self.author_chip = QPushButton()
         self.author_chip.setToolTip("Stop filtering by this author")
-        self.author_chip.setStyleSheet(f"QPushButton {{ background: {theme.ACCENT_LO}; border: none; border-radius: 11px; padding: 3px 10px; }}")
+        self.author_chip.setStyleSheet(f"QPushButton {{ background: {theme.ACCENT_LO}; border: none; border-radius: {theme.rad(11):g}px; padding: 3px 10px; }}")
         self.author_chip.hide()
         self.author_chip.clicked.connect(self.clear_author)
         top.addWidget(self.author_chip)
@@ -836,7 +849,7 @@ class BrowsePage(QWidget):
             b.setProperty("kind", "toggle")
             b.setProperty("mode", mode)
             b.setToolTip(tip)
-            radius = "border-top-left-radius:5px;border-bottom-left-radius:5px;" if i == 0 else \
+            radius = "" if theme.PIXEL else "border-top-left-radius:5px;border-bottom-left-radius:5px;" if i == 0 else \
                 "border-top-right-radius:5px;border-bottom-right-radius:5px;"
             b.setStyleSheet(f"QPushButton {{ {radius} padding: 4px 12px; }}")
             self.view_group.addButton(b, i)
