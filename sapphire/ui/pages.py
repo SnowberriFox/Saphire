@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -35,17 +34,18 @@ class ProfilesPage(QWidget):
         title = QLabel("Profiles")
         title.setObjectName("PageTitle")
         root.addWidget(title)
-        hint = QLabel("A profile remembers which mods are on and their order. Switch between "
-                      "setups (say, yours and your partner's) in one click.")
+        hint = QLabel("Each profile is its own setup: its own mods, order and on/off. Installed only shows the "
+                      "profile you're on, and changes save into it as you make them. Mods are downloaded once and "
+                      "shared, so switching is instant and nothing downloads twice.")
         hint.setObjectName("Muted")
         hint.setWordWrap(True)
         root.addWidget(hint)
 
         row = QHBoxLayout()
-        self.save_btn = QPushButton("Save current setup as…")
-        self.save_btn.setProperty("kind", "primary")
-        self.save_btn.clicked.connect(self.save_new)
-        row.addWidget(self.save_btn)
+        self.new_btn = QPushButton("New profile…")
+        self.new_btn.setProperty("kind", "primary")
+        self.new_btn.clicked.connect(self.new_profile)
+        row.addWidget(self.new_btn)
         row.addStretch(1)
         self.import_btn = QPushButton("Import a profile file…")
         self.import_btn.setToolTip("Open a profile someone shared with you. Mods you don't have are downloaded.")
@@ -59,7 +59,7 @@ class ProfilesPage(QWidget):
         self.list.currentItemChanged.connect(lambda *_: self._sync())
         root.addWidget(self.list, 1)
 
-        self.empty = QLabel("No profiles yet. Set up your mods the way you like, then save them here.")
+        self.empty = QLabel("No profiles yet.")
         self.empty.setObjectName("Muted")
         self.empty.setAlignment(Qt.AlignCenter)
         root.addWidget(self.empty, 1)
@@ -68,8 +68,9 @@ class ProfilesPage(QWidget):
         self.load_btn = QPushButton("Switch to this profile")
         self.load_btn.setProperty("kind", "primary")
         self.load_btn.clicked.connect(self.load)
-        self.overwrite_btn = QPushButton("Save current setup into it")
-        self.overwrite_btn.clicked.connect(self.overwrite)
+        self.dup_btn = QPushButton("Duplicate")
+        self.dup_btn.setToolTip("A new profile with the same mods, order and on/off")
+        self.dup_btn.clicked.connect(self.duplicate)
         self.rename_btn = QPushButton("Rename")
         self.rename_btn.clicked.connect(self.rename)
         self.delete_btn = QPushButton("Delete")
@@ -79,7 +80,7 @@ class ProfilesPage(QWidget):
         self.export_btn.setToolTip("Save this profile to a file you can send. Whoever opens it gets the same "
                                    "mods, order and variants; GameBanana mods download automatically.")
         self.export_btn.clicked.connect(self._export)
-        for b in (self.load_btn, self.overwrite_btn, self.rename_btn, self.export_btn):
+        for b in (self.load_btn, self.dup_btn, self.rename_btn, self.export_btn):
             actions.addWidget(b)
         actions.addStretch(1)
         actions.addWidget(self.delete_btn)
@@ -89,12 +90,16 @@ class ProfilesPage(QWidget):
     def reload(self):
         cur = self._current()
         self.list.clear()
-        profs = sorted(self.mgr.lib.profiles.values(), key=lambda p: p.name.lower())
+        lib = self.mgr.lib
+        profs = sorted(lib.profiles.values(), key=lambda p: p.name.lower())
         for prof in profs:
-            on = sum(1 for _, e in prof.entries if e)
-            saved = dt.datetime.fromtimestamp(prof.saved_at).strftime("%-d %b %Y, %H:%M") if prof.saved_at else ""
-            active = "   (active)" if prof.name == self.mgr.lib.active_profile else ""
-            item = QListWidgetItem(f"{prof.name}{active}\n{on} mods on    saved {saved}")
+            if prof.name == lib.active_profile:
+                mods = lib.visible()
+                total, on = len(mods), sum(1 for m in mods if m.enabled)
+            else:
+                total, on = len(prof.entries), sum(1 for _, e in prof.entries if e)
+            active = "   (in use)" if prof.name == lib.active_profile else ""
+            item = QListWidgetItem(f"{prof.name}{active}\n{total} mod{'s' if total != 1 else ''}, {on} on")
             item.setData(Qt.UserRole, prof.name)
             self.list.addItem(item)
             if prof.name == cur:
@@ -108,9 +113,15 @@ class ProfilesPage(QWidget):
         return it.data(Qt.UserRole) if it else None
 
     def _sync(self):
-        has = self._current() is not None
-        for b in (self.load_btn, self.overwrite_btn, self.rename_btn, self.delete_btn, self.export_btn):
+        cur = self._current()
+        has = cur is not None
+        active = cur == self.mgr.lib.active_profile
+        for b in (self.dup_btn, self.rename_btn, self.export_btn):
             b.setEnabled(has)
+        self.load_btn.setEnabled(has and not active)
+        self.delete_btn.setEnabled(has and not active)
+        self.delete_btn.setToolTip("You're using this profile: switch to another one to delete it." if active
+                                   else "Delete the profile. Its mods stay downloaded for other profiles.")
 
     def _export(self):
         from pathlib import Path
@@ -142,22 +153,60 @@ class ProfilesPage(QWidget):
         if path:
             self.import_requested.emit(Path(path))
 
-    def save_new(self):
-        name = ask_text(self, "Save profile", "Profile name:")
+    def new_profile(self):
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QRadioButton
+        lib = self.mgr.lib
+        dlg = QDialog(self)
+        dlg.setWindowTitle("New profile")
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel("Name:"))
+        name = QLineEdit()
+        lay.addWidget(name)
+        empty = QRadioButton("Start empty (add mods from Browse, or ones you already have)")
+        copy = QRadioButton(f"Start as a copy of “{lib.active_profile}”")
+        empty.setChecked(True)
+        lay.addWidget(empty)
+        lay.addWidget(copy)
+        switch = QCheckBox("Switch to it now")
+        switch.setChecked(True)
+        lay.addWidget(switch)
+        box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        box.accepted.connect(dlg.accept)
+        box.rejected.connect(dlg.reject)
+        lay.addWidget(box)
+        if not dlg.exec() or not name.text().strip():
+            return
+        try:
+            self.mgr.new_profile(name.text(), copy=copy.isChecked())
+        except Exception as exc:  # noqa: BLE001
+            error(self, "Couldn't make the profile", str(exc))
+            return
+        self._select(name.text().strip())
+        if switch.isChecked():
+            self.load()
+        else:
+            self.reload()
+
+    def duplicate(self):
+        name = self._current()
         if not name:
             return
-        if name in self.mgr.lib.profiles and not confirm(
-                self, "Replace profile", f"“{name}” already exists. Replace it with the current setup?",
-                "Replace"):
+        new = ask_text(self, "Duplicate profile", "Name for the copy:", f"{name} copy")
+        if not new:
             return
-        self.mgr.save_profile(name)
+        try:
+            self.mgr.duplicate_profile(name, new)
+        except Exception as exc:  # noqa: BLE001
+            error(self, "Couldn't copy the profile", str(exc))
+            return
+        self._select(new.strip())
         self.reload()
 
-    def overwrite(self):
-        name = self._current()
-        if name and confirm(self, "Update profile", f"Replace “{name}” with your current setup?", "Replace"):
-            self.mgr.save_profile(name)
-            self.reload()
+    def _select(self, name: str):
+        self.reload()
+        for i in range(self.list.count()):
+            if self.list.item(i).data(Qt.UserRole) == name:
+                self.list.setCurrentRow(i)
 
     def load(self):
         name = self._current()
@@ -182,9 +231,13 @@ class ProfilesPage(QWidget):
 
     def delete(self):
         name = self._current()
-        if name and confirm(self, "Delete profile", f"Delete the profile “{name}”? Your mods stay installed.",
+        if name and confirm(self, "Delete profile", f"Delete the profile “{name}”? Its mods stay downloaded "
+                            "(other profiles keep theirs, and “Add downloaded mods…” can bring any back).",
                             "Delete", danger=True):
-            self.mgr.delete_profile(name)
+            try:
+                self.mgr.delete_profile(name)
+            except Exception as exc:  # noqa: BLE001
+                error(self, "Couldn't delete it", str(exc))
             self.reload()
 
 

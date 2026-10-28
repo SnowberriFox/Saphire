@@ -566,6 +566,54 @@ def main():
         print("deployed after install:", addons)
         pixel_themes()
 
+    def profiles_step():
+        # Ham's separate profiles (1.11.0)
+        page = win.installed
+        mgr.new_profile("Ham")
+        win.go(1)
+        box = page.profile_box
+        page.reload()
+        box.setCurrentIndex(box.findData("Ham"))
+        box.activated.emit(box.currentIndex())
+        app.processEvents()
+        print("profile Ham:", mgr.lib.active_profile, "| shown:", page.list.count(),
+              "| add-downloaded visible:", page.add_existing_btn.isVisible())
+        QTimer.singleShot(500, lambda: (shot("24-empty-profile"), add_some()))
+
+        def add_some():
+            from sapphire.ui.profile_add import AddDownloadedDialog
+            dlg = AddDownloadedDialog(win, mgr)
+            dlg.show()
+            for i in range(2):
+                dlg.list.item(i).setCheckState(Qt.Checked)
+            app.processEvents()
+            dlg.grab().save(str(OUT / "25-add-downloaded.png"))
+            dlg.accept()
+            added = mgr.add_to_profile(dlg.chosen)
+            page.reload()
+            win._library_changed()
+            print("added:", added, "| shown now:", page.list.count(), "| on:", sum(m.enabled for m in mgr.lib.visible()))
+            win.go(0)
+            QTimer.singleShot(600, browse_badges)
+
+        def browse_badges():
+            states = {}
+            for sub in win.browse.model.items:
+                st = win.browse._install_state(sub)
+                if st:
+                    states[st] = states.get(st, 0) + 1
+            print("browse badges in Ham:", states)
+            shot("26-browse-downloaded")
+            win.go(2)
+            win.profiles.reload()
+            QTimer.singleShot(500, lambda: (shot("27-profiles"), back()))
+
+        def back():
+            win.switch_profile("Mine")
+            print("back to Mine:", mgr.lib.active_profile, "| shown:", win.installed.list.count(),
+                  "| profiles:", sorted(mgr.lib.profiles))
+            app.quit()
+
     def hero_tour():
         # Ham's hero tour (1.10.0): one hero at a time, with what you're using for them
         b = win.browse
@@ -594,7 +642,7 @@ def main():
             QTimer.singleShot(400, lambda: (print("resumed at:", b._tour[b._tour_i]),
                                             b._tour_go(len(b._tour) - 1), b._tour_forward(),
                                             print("finished: saved =", repr(mgr.lib.settings.hero_tour),
-                                                  "| button:", b.tour_btn.text()), app.quit()))
+                                                  "| button:", b.tour_btn.text()), profiles_step()))
         QTimer.singleShot(900, step1)
 
     def nsfw_only():

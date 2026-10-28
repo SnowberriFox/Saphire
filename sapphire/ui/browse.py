@@ -223,7 +223,8 @@ class CardDelegate(QStyledItemDelegate):
         state = self.installed_fn(sub)
         for text, bg, fg in (
             ("Update ready", theme.ACCENT, theme.ON_ACCENT) if state == "update" else
-            ("Installed", theme.OK_BG, theme.VERDIGRIS) if state == "installed" else (None, None, None),
+            ("Installed", theme.OK_BG, theme.VERDIGRIS) if state == "installed" else
+            ("Downloaded", theme.RAISED, theme.MUTED) if state == "downloaded" else (None, None, None),
             ("18+", theme.OXBLOOD, "#FFF2EE") if sub.nsfw else (None, None, None),
             ("Outdated", theme.RAISED, theme.MUTED) if sub.obsolete else (None, None, None),
             ("★", theme.ACCENT_LO, theme.ACCENT_HI) if self.fav_fn(sub) else (None, None, None),
@@ -1054,7 +1055,7 @@ class BrowsePage(QWidget):
         """(on, off) installed mods that change this hero's look, in load order."""
         want = hero_key(hero)
         on, off = [], []
-        for m in self.mgr.lib.ordered():
+        for m in self.mgr.lib.visible():
             hit = False
             cat = m.category.split(" › ")
             if len(cat) == 2 and cat[0].lower() == "skins" and hero_key(cat[1]) == want:
@@ -1082,6 +1083,8 @@ class BrowsePage(QWidget):
         mod = self.mgr.lib.by_gb(sub.model, sub.id)
         if not mod:
             return None
+        if mod.uid not in self.mgr.lib.members:
+            return "downloaded"        # in another profile: adding it here needs no download
         return "update" if mod.update else "installed"
 
     def _toggle_fav(self, sub) -> bool:

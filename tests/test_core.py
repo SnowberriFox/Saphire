@@ -409,14 +409,15 @@ def test_profiles(setup):
     mgr.install_gamebanana("Mod", 1)
     mgr.install_gamebanana("Mod", 2)
     mgr.save_profile("both")
+    mgr.save_profile("just one")       # a copy of "both"; changes now go into "just one" only
     mgr.set_enabled("gb-Mod-2", False)
-    mgr.save_profile("just one")
     mgr.load_profile("both")
     assert all(m.enabled for m in mgr.lib.mods.values())
-    mgr.remove("gb-Mod-1")
-    assert mgr.load_profile("both") == ["gb-Mod-1"]
+    mgr.remove("gb-Mod-1")            # uninstalling takes it out of every profile
+    assert mgr.load_profile("both") == []
+    assert all("gb-Mod-1" not in dict(p.entries) for p in mgr.lib.profiles.values())
     mgr.rename_profile("just one", "solo")
-    assert set(mgr.lib.profiles) == {"both", "solo"}
+    assert set(mgr.lib.profiles) == {"Default", "both", "solo"}
 
 
 def test_running_game_blocks_apply(setup, monkeypatch):
@@ -476,7 +477,8 @@ def test_clear_all_data(setup):
     mgr.apply()
     assert addons(game) and mgr.lib.profiles
     assert mgr.clear_all_data() == 1
-    assert mgr.lib.mods == {} and mgr.lib.profiles == {} and addons(game) == []
+    assert mgr.lib.mods == {} and addons(game) == []
+    assert list(mgr.lib.profiles) == ["Default"] and mgr.lib.profiles["Default"].entries == []
     assert not gameinfo.inspect(gameinfo.read(game)).patched
     from sapphire import paths
     assert list(paths.library_dir().iterdir()) == []

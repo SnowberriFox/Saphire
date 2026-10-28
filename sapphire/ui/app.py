@@ -146,6 +146,7 @@ class MainWindow(QMainWindow):
         self.installed.rollback_requested.connect(self.roll_back)
         self.installed.status.connect(self.say)
         self.installed.priority_requested.connect(self.edit_priority)
+        self.installed.profile_switch_requested.connect(self.switch_profile)
         self.browse.collection_requested.connect(self.open_collection)
         self.crosshair.status.connect(self.say)
         self.profiles.import_requested.connect(self.import_profile_file)
@@ -253,7 +254,7 @@ class MainWindow(QMainWindow):
 
     # -------------------------------------------------------------- state
     def _refresh_nav(self):
-        mods = self.mgr.lib.ordered()
+        mods = self.mgr.lib.visible()
         on = sum(1 for m in mods if m.enabled)
         updates = sum(1 for m in mods if m.update)
         self.nav_buttons[1].setText(f"Installed  {len(mods)}" + (f"  ({updates} updates)" if updates else ""))
@@ -300,7 +301,7 @@ class MainWindow(QMainWindow):
             return
         self.presence.set_client_id(st.discord_app_id)
         self.presence.start()
-        mods = self.mgr.lib.ordered()
+        mods = self.mgr.lib.visible()
         on = sum(1 for m in mods if m.enabled)
         page = self.stack.currentIndex()
         if self.running:
@@ -374,7 +375,7 @@ class MainWindow(QMainWindow):
             self.go(PAGE_SETTINGS)
             self._refresh_nav()
         else:
-            self.go(0 if not self.mgr.lib.mods else 1)
+            self.go(0 if not self.mgr.lib.visible() else 1)
             self.browse.start()
             # Self-heal on every start: re-sync files and gameinfo.gi (cheap when nothing changed).
             self.mgr._dirty = True
@@ -536,6 +537,13 @@ class MainWindow(QMainWindow):
 
         run(self.mgr.launch, on_done=done, on_error=failed, pool=JOB_POOL)
 
+    def switch_profile(self, name: str):
+        missing = self.mgr.load_profile(name)
+        self.profiles.reload()
+        self._profile_switched()
+        self.say(f"Switched to {name}." + (f" {len(missing)} of its mods were uninstalled, so they're gone from "
+                                            "it." if missing else ""))
+
     def _profile_switched(self):
         self._library_changed()
         self.request_apply()
@@ -613,6 +621,16 @@ class MainWindow(QMainWindow):
         return job
 
     def install_gb(self, model: str, gb_id: int, file=None, add: bool = False):
+        lib = self.mgr.lib
+        if not add:
+            # Already downloaded for another profile: just put it in this one.
+            have = lib.by_gb_file(model, gb_id, file.id) if file is not None else lib.by_gb(model, gb_id)
+            if have is not None and have.uid not in lib.members:
+                self.mgr.add_to_profile([have.uid])
+                self._library_changed()
+                self.request_apply()
+                self.say(f"Added {have.name} to {lib.active_profile} (already downloaded, nothing to fetch).")
+                return
         existing = self.mgr.lib.by_gb(model, gb_id)
         label = existing.name if existing else f"GameBanana {model.lower()} {gb_id}"
         if file is not None:
@@ -620,7 +638,7 @@ class MainWindow(QMainWindow):
 
         def do(model, gb_id, file, add, choose=None, progress=None, cancel=None):
             return self.mgr.install_gamebanana(model, gb_id, file, choose=choose,
-                                               progress=progress, cancel=cancel, add=add)
+                                               progress=progress, cancel=cancel, add=add, to_profile=True)
         fid = file.id if file is not None else "newest"
         self._queue(label, do, model, gb_id, file, add,
                     success="Installed {name}.", key=f"gb:{model}:{gb_id}:{fid}:{int(add)}")
@@ -773,7 +791,7 @@ class MainWindow(QMainWindow):
             error(self, "Couldn't change the helper", str(exc))
 
     def update_all(self):
-        for mod in [m for m in self.mgr.lib.ordered() if m.update]:
+        for mod in [m for m in self.mgr.lib.visible() if m.update]:
             self.update_mod(mod.uid)   # skips mods already queued or updating
 
     def add_files(self):

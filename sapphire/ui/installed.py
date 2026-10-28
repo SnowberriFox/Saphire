@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QPainter, QPainterPath, QPen, QPolygonF
-from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
+from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMenu, QPushButton, QScrollArea, QSizePolicy,
                                QStyle, QStyledItemDelegate, QStyleOptionViewItem, QTreeWidget,
                                QTreeWidgetItem, QVBoxLayout, QWidget)
@@ -405,7 +405,7 @@ class DetailPanel(QScrollArea):
         h = QLabel("Load order")
         h.setObjectName("SideTitle")
         self.lay.addWidget(h)
-        pos, total = self.page.rank.get(mod.uid), len(self.page.mgr.lib.order)
+        pos, total = self.page.rank.get(mod.uid), len(self.page.mgr.lib.members)
         row = QHBoxLayout()
         where = QLabel(f"#{pos} of {total}" + (", locked" if mod.locked else ""))
         where.setStyleSheet("background: transparent;")
@@ -716,12 +716,18 @@ class DetailPanel(QScrollArea):
         folder.clicked.connect(lambda: steam.open_path(mod.folder))
         rename = QPushButton("Rename")
         rename.clicked.connect(lambda: self.page.rename(mod.uid))
+        out = QPushButton("Remove from profile")
+        out.setToolTip(f"Take it out of “{self.page.mgr.lib.active_profile}”. It stays downloaded, so other "
+                       "profiles keep it and you can add it back without downloading.")
+        out.clicked.connect(lambda: self.page.remove_from_profile(mod.uid))
         remove = QPushButton("Uninstall")
         remove.setProperty("kind", "danger")
+        remove.setToolTip("Delete it from Sapphire and from every profile")
         remove.clicked.connect(lambda: self.page.remove(mod.uid))
         bottom.addWidget(folder)
         bottom.addWidget(rename)
         bottom.addStretch(1)
+        bottom.addWidget(out)
         bottom.addWidget(remove)
         self.lay.addLayout(bottom)
 
@@ -739,6 +745,7 @@ class InstalledPage(QWidget):
     removed = Signal(str)
     status = Signal(str)
     priority_requested = Signal()
+    profile_switch_requested = Signal(str)
 
     def __init__(self, manager, images):
         super().__init__()
@@ -763,6 +770,14 @@ class InstalledPage(QWidget):
         self.title = QLabel("Installed")
         self.title.setObjectName("PageTitle")
         top.addWidget(self.title)
+        top.addSpacing(10)
+        self.profile_box = QComboBox()
+        self.profile_box.setToolTip("Each profile has its own mods, order and on/off. Switching is instant: "
+                                    "mods are only downloaded once. Manage profiles on the Profiles page.")
+        self.profile_box.setMinimumWidth(160)
+        self.profile_box.activated.connect(self._profile_picked)
+        top.addWidget(self.profile_box)
+        top.addSpacing(6)
         self.count = QLabel()
         self.count.setObjectName("Muted")
         top.addWidget(self.count)
@@ -801,6 +816,10 @@ class InstalledPage(QWidget):
         self.add_btn = QPushButton("Add a file…")
         self.add_btn.setToolTip("Install a .zip, .7z, .rar or .vpk from your computer")
         self.add_btn.clicked.connect(self.add_file_requested)
+        self.add_existing_btn = QPushButton("Add downloaded mods…")
+        self.add_existing_btn.setToolTip("Put mods you already have (from other profiles) into this one, "
+                                         "without downloading them again")
+        self.add_existing_btn.clicked.connect(self.add_existing)
         self.identify_btn = QPushButton("Identify unknown")
         self.identify_btn.setToolTip("Match mods that were added by hand to their GameBanana page")
         self.identify_btn.clicked.connect(lambda: self.identify_requested.emit(None))
@@ -817,7 +836,7 @@ class InstalledPage(QWidget):
         all_on.clicked.connect(lambda: self.set_all(True))
         all_off = QPushButton("All off")
         all_off.clicked.connect(lambda: self.set_all(False))
-        for b in (self.check_btn, self.update_all_btn, self.add_btn, self.identify_btn):
+        for b in (self.check_btn, self.update_all_btn, self.add_btn, self.add_existing_btn, self.identify_btn):
             actions.addWidget(b)
         actions.addStretch(1)
         actions.addWidget(self.reapply_btn)
@@ -882,7 +901,7 @@ class InstalledPage(QWidget):
         self._building = True
         current = self.detail.uid
         self.list.clear()
-        for mod in self.mgr.lib.ordered():
+        for mod in self.mgr.lib.visible():
             item = QListWidgetItem()
             item.setData(ROLE_UID, mod.uid)
             item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
@@ -894,10 +913,11 @@ class InstalledPage(QWidget):
         self._building = False
         self._recount()
         self._apply_filter(self.filter.text())
-        self.detail.show_mod(current if current in self.mgr.lib.mods else None)
+        self.detail.show_mod(current if current in self.mgr.lib.members else None)
+        self._fill_profiles()
 
     def _recount(self):
-        mods = self.mgr.lib.ordered()
+        mods = self.mgr.lib.visible()
         on = [m for m in mods if m.enabled]
         self.rank = {m.uid: i + 1 for i, m in enumerate(mods)}
         self.surprises = {}
@@ -923,7 +943,7 @@ class InstalledPage(QWidget):
         return "fixed" if any(r.status == "fixed" for r in rep) else "warning"
 
     def _update_button(self):
-        pending = [m for m in self.mgr.lib.ordered() if m.update]
+        pending = [m for m in self.mgr.lib.visible() if m.update]
         busy = [m for m in pending if self.busy(m.uid)]
         waiting = len(pending) - len(busy)
         if waiting:
@@ -1068,12 +1088,56 @@ class InstalledPage(QWidget):
         mod = self.mgr.lib.mods.get(uid)
         if not mod:
             return
+        others = [n for n in self.mgr.lib.profiles_with(uid) if n != self.mgr.lib.active_profile]
+        also = (f" It's also in {', '.join(others)}, which will lose it too. To take it out of this profile "
+                "only, use Remove from profile." if others else "")
         if confirm(self, "Uninstall mod", f"Uninstall “{mod.name}”? Its files are deleted from "
-                   "Sapphire's library and the game.", "Uninstall", danger=True):
+                   f"Sapphire's library and the game.{also}", "Uninstall", danger=True):
             self.mgr.remove(uid)
             self.reload()
             self.removed.emit(uid)
             self.changed.emit()
+
+    def remove_from_profile(self, uid):
+        mod = self.mgr.lib.mods.get(uid)
+        if not mod:
+            return
+        self.mgr.remove_from_profile(uid)
+        self.reload()
+        self.removed.emit(uid)
+        self.changed.emit()
+        self.status.emit(f"Took {mod.name} out of {self.mgr.lib.active_profile}. It's still downloaded: "
+                         "“Add downloaded mods…” puts it back.")
+
+    def add_existing(self):
+        from sapphire.ui.profile_add import AddDownloadedDialog
+        dlg = AddDownloadedDialog(self, self.mgr)
+        if dlg.exec() and dlg.chosen:
+            added = self.mgr.add_to_profile(dlg.chosen)
+            self.reload()
+            self.removed.emit("")          # refresh the rest of the window (Browse badges, counts)
+            self.changed.emit()
+            self.status.emit(f"Added {len(added)} mod{'s' if len(added) != 1 else ''} to "
+                             f"{self.mgr.lib.active_profile}.")
+
+    def _fill_profiles(self):
+        lib = self.mgr.lib
+        self.profile_box.blockSignals(True)
+        self.profile_box.clear()
+        for name in sorted(lib.profiles, key=str.lower):
+            self.profile_box.addItem(name, name)
+        self.profile_box.setCurrentIndex(max(0, self.profile_box.findData(lib.active_profile)))
+        self.profile_box.blockSignals(False)
+        self.add_existing_btn.setVisible(bool(lib.not_in_profile()))
+        others = bool(lib.not_in_profile())
+        self.empty.setText(f"No mods in {lib.active_profile} yet. Find some in Browse"
+                           + (", or use “Add downloaded mods…” to bring in ones you already have." if others
+                              else ", or add a file you already downloaded."))
+
+    def _profile_picked(self, _i):
+        name = self.profile_box.currentData()
+        if name and name != self.mgr.lib.active_profile:
+            self.profile_switch_requested.emit(name)
 
     def _menu(self, pos):
         item = self.list.itemAt(pos)
@@ -1101,5 +1165,6 @@ class InstalledPage(QWidget):
         if self.mgr.can_roll_back(uid):
             menu.addAction("Roll back to the previous version", lambda: self.rollback_requested.emit(uid))
         menu.addAction("Rename…", lambda: self.rename(uid))
+        menu.addAction(f"Remove from {self.mgr.lib.active_profile}", lambda: self.remove_from_profile(uid))
         menu.addAction("Uninstall…", lambda: self.remove(uid))
         menu.exec(self.list.viewport().mapToGlobal(pos))

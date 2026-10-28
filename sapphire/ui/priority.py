@@ -96,9 +96,9 @@ class PriorityDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Priority")
         self.mgr = manager
-        self.mods = dict(manager.lib.mods)
+        self.mods = {m.uid: m for m in manager.lib.visible()}      # this profile's mods
         self.order: list[str] = [u for u in manager.lib.order if u in self.mods]
-        self.locks: dict[str, int] = manager.lib.locks()
+        self.locks: dict[str, int] = {u: v for u, v in manager.lib.locks().items() if u in self.mods}
         self.resize(theme.px(720), theme.px(640))
 
         lay = QVBoxLayout(self)

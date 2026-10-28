@@ -18,7 +18,7 @@ from sapphire import paths
 
 log = logging.getLogger(__name__)
 
-SCHEMA = 1
+SCHEMA = 2   # 2 (1.11.0): profiles are separate, live setups
 
 
 @dataclass
@@ -143,9 +143,14 @@ class Library:
         self.order: list[str] = []  # index 0 = highest priority (wins conflicts)
         self.profiles: dict[str, Profile] = {}
         self.active_profile: str | None = None
+        # The mods in the active profile. Every downloaded mod lives in `mods`;
+        # a profile only shows (and can only turn on) its own. Members always
+        # come first in `order`.
+        self.members: set[str] = set()
         self.deployed: dict[str, dict] = {}  # "addons/pak01_dir.vpk" -> {src,size,mtime_ns}
         self.favourites: dict[str, dict] = {}  # "Mod:123" -> the submission as last seen
         self.load()
+        self._ensure_profile()
 
     # ------------------------------------------------------------- persistence
     def load(self) -> None:
@@ -176,7 +181,9 @@ class Library:
                 self.mods[uid] = InstalledMod.from_dict(raw)
             except (TypeError, StopIteration) as exc:
                 log.error("skipping corrupt mod entry %s: %s", uid, exc)
-        self.order = [u for u in data.get("order") or [] if u in self.mods]
+        # dict.fromkeys: drop repeats (older versions could list a mod twice,
+        # which showed it twice in Installed)
+        self.order = list(dict.fromkeys(u for u in data.get("order") or [] if u in self.mods))
         for uid in self.mods:  # anything missing from order goes to the bottom
             if uid not in self.order:
                 self.order.append(uid)
@@ -185,6 +192,17 @@ class Library:
                                           origin=str(raw.get("origin") or ""),
                                           entries=[(u, bool(e)) for u, e in raw.get("entries", [])])
         self.active_profile = data.get("active_profile")
+        if int(data.get("schema") or 1) < 2:
+            # keep the old file next to it, just in case
+            backup = self.path.with_name("state.before-1.11.json")
+            if not backup.exists():
+                try:
+                    backup.write_bytes(self.path.read_bytes())
+                except OSError:
+                    pass
+            self._migrate_profiles()
+        elif self.active_profile in self.profiles:
+            self.members = {u for u, _ in self.profiles[self.active_profile].entries if u in self.mods}
         self.deployed = data.get("deployed") or {}
         fav = data.get("favourites") or {}
         self.favourites = {k: v for k, v in fav.items() if isinstance(v, dict)} if isinstance(fav, dict) else {}
@@ -199,6 +217,7 @@ class Library:
             self._save()
 
     def _save(self) -> None:
+        self._sync_active()
         data = {
             "schema": SCHEMA,
             "game_dir": self.game_dir,
@@ -220,7 +239,12 @@ class Library:
 
     # ------------------------------------------------------------------ helpers
     def ordered(self) -> list[InstalledMod]:
+        """Every downloaded mod in load order (the active profile's first)."""
         return [self.mods[u] for u in self.order if u in self.mods]
+
+    def visible(self) -> list[InstalledMod]:
+        """The active profile's mods, in its load order: what Installed shows."""
+        return [self.mods[u] for u in self.order if u in self.members and u in self.mods]
 
     def enabled_in_order(self) -> list[InstalledMod]:
         return [m for m in self.ordered() if m.enabled]
@@ -268,20 +292,29 @@ class Library:
                 continue
         return out
 
-    def add(self, mod: InstalledMod, top: bool = True) -> None:
+    def add(self, mod: InstalledMod, top: bool = True, member: bool = True) -> None:
+        """Add a downloaded mod. `member` puts it in the active profile too
+        (an imported shared profile's downloads don't belong to the current one)."""
         self.mods[mod.uid] = mod
-        if mod.uid in self.order:
-            return
-        if top:
-            self.order.insert(0, mod.uid)
-        else:
-            self.order.append(mod.uid)
+        if member:
+            self.members.add(mod.uid)
+        elif mod.uid not in self.members:
+            mod.enabled = False
+        if mod.uid not in self.order:
+            if top:
+                self.order.insert(0, mod.uid)
+            else:
+                self.order.append(mod.uid)
         self._pin()
 
     def remove(self, uid: str) -> InstalledMod | None:
+        """Forget a mod everywhere (uninstall): every profile loses it."""
         mod = self.mods.pop(uid, None)
         if uid in self.order:
             self.order.remove(uid)
+        self.members.discard(uid)
+        for prof in self.profiles.values():
+            prof.entries = [(u, e) for u, e in prof.entries if u != uid]
         self._pin()
         return mod
 
@@ -293,9 +326,14 @@ class Library:
         self.order = [new if u == old else u for u in self.order]
         if new not in self.order:
             self.order.append(new)
+        if old in self.members:
+            self.members.discard(old)
+            self.members.add(new)
+        for prof in self.profiles.values():
+            prof.entries = [(new if u == old else u, e) for u, e in prof.entries]
 
     def set_order(self, uids: list[str]) -> None:
-        seen = [u for u in uids if u in self.mods]
+        seen = list(dict.fromkeys(u for u in uids if u in self.mods))
         rest = [u for u in self.order if u not in seen]
         self.order = seen + rest
         self._pin()
@@ -305,8 +343,13 @@ class Library:
         return {u: m.lock_at for u, m in self.mods.items() if m.lock_at is not None}
 
     def _pin(self) -> None:
-        """Put locked mods back in their slots; everything else keeps its order around them."""
-        self.order = pin(self.order, self.locks())
+        """The active profile's mods first, with its locked mods back in their
+        slots; everything else keeps its order around them."""
+        order = list(dict.fromkeys(self.order))
+        mine = [u for u in order if u in self.members]
+        rest = [u for u in order if u not in self.members]
+        locks = {u: s for u, s in self.locks().items() if u in self.members}
+        self.order = pin(mine, locks) + rest
 
     def lock(self, uid: str, on: bool = True) -> None:
         """Lock a mod to the slot it's in now (or unlock it)."""
@@ -315,36 +358,134 @@ class Library:
     def move_to(self, uid: str, slot: int) -> None:
         """Move one mod to a slot (0 = #1). Locked mods stay put; moving a locked
         mod itself moves its lock."""
-        locks = self.locks()
-        self.order = move(self.order, locks, uid, slot)
-        for u, m in self.mods.items():
-            m.lock_at = locks.get(u)
+        locks = {u: s for u, s in self.locks().items() if u in self.members}
+        mine = [u for u in self.order if u in self.members]
+        self.order = move(mine, locks, uid, slot) + [u for u in self.order if u not in self.members]
+        for u in self.members:
+            if u in self.mods:
+                self.mods[u].lock_at = locks.get(u)
+        self._pin()
 
     def set_priority(self, order: list[str], locks: dict[str, int]) -> None:
         """Replace the order and every lock at once (the Priority dialog's Save)."""
-        for u, m in self.mods.items():
-            m.lock_at = locks.get(u)
+        for u in self.members:
+            if u in self.mods:
+                self.mods[u].lock_at = locks.get(u)
         self.set_order(order)
 
     # ----------------------------------------------------------------- profiles
-    def snapshot(self, name: str) -> Profile:
-        prof = Profile(name=name, saved_at=int(time.time()),
-                       entries=[(m.uid, m.enabled) for m in self.ordered()])
-        self.profiles[name] = prof
-        self.active_profile = name
-        return prof
+    # Profiles are separate, live setups (like Deadlock Mod Manager's): each has
+    # its own mods, order and on/off, and changes save into the active one as you
+    # make them. Files are shared, so a mod in two profiles is downloaded once.
 
-    def restore(self, name: str) -> list[str]:
-        """Apply a profile's order and enabled flags. Returns uids it lists that are gone."""
+    def _sync_active(self) -> None:
+        """Write the live state (order, on/off) into the active profile."""
+        prof = self.profiles.get(self.active_profile or "")
+        if prof is not None:
+            prof.entries = [(u, self.mods[u].enabled) for u in self.order if u in self.members and u in self.mods]
+
+    def _unique_name(self, base: str) -> str:
+        name, n = base, 2
+        while name in self.profiles:
+            name, n = f"{base} {n}", n + 1
+        return name
+
+    def _migrate_profiles(self) -> None:
+        """From 1.10 and before, where profiles were snapshots over one shared
+        list: each profile keeps the mods that were on in it; the active one
+        keeps what's on right now. Mods on nowhere stay downloaded."""
+        for prof in self.profiles.values():
+            prof.entries = list(dict.fromkeys((u, True) for u, on in prof.entries if on and u in self.mods))
+        live = [u for u in self.order if u in self.mods and self.mods[u].enabled]
+        if self.active_profile not in self.profiles:
+            self.active_profile = self._unique_name("Default")
+            self.profiles[self.active_profile] = Profile(self.active_profile, saved_at=int(time.time()))
+        self.profiles[self.active_profile].entries = [(u, True) for u in live]
+        self.members = set(live)
+        for uid, mod in self.mods.items():
+            if uid not in self.members:
+                mod.enabled = False
+        self._pin()
+
+    def _ensure_profile(self) -> None:
+        """There's always an active profile (a fresh install gets "Default")."""
+        if self.active_profile in self.profiles:
+            return
+        if self.profiles:
+            self.switch(sorted(self.profiles, key=str.lower)[0])
+            return
+        self.active_profile = "Default"
+        self.members = set(self.mods)
+        self.profiles["Default"] = Profile("Default", saved_at=int(time.time()))
+        self._sync_active()
+
+    def switch(self, name: str) -> list[str]:
+        """Make `name` the active profile. Returns uids it lists that are gone."""
+        self._sync_active()
         prof = self.profiles[name]
         missing = [u for u, _ in prof.entries if u not in self.mods]
         listed = [u for u, _ in prof.entries if u in self.mods]
         flags = dict(prof.entries)
+        self.members = set(listed)
         for uid, mod in self.mods.items():
-            mod.enabled = bool(flags.get(uid, False))  # mods not in the profile are off
-        self.set_order(listed)
+            mod.enabled = bool(flags.get(uid, False)) if uid in self.members else False
         self.active_profile = name
+        prof.saved_at = int(time.time())
+        self.set_order(listed)
         return missing
+
+    def new_profile(self, name: str, copy: bool = False) -> Profile:
+        """A new profile: empty, or a copy of the active one. Doesn't switch to it."""
+        self._sync_active()
+        entries = list(self.profiles[self.active_profile].entries) if copy and self.active_profile in self.profiles else []
+        prof = Profile(name=name, entries=entries, saved_at=int(time.time()))
+        self.profiles[name] = prof
+        return prof
+
+    def copy_profile(self, src: str, name: str) -> Profile:
+        """A new profile with `src`'s mods, order and on/off."""
+        self._sync_active()
+        prof = Profile(name=name, entries=list(self.profiles[src].entries), saved_at=int(time.time()))
+        self.profiles[name] = prof
+        return prof
+
+    def add_to_profile(self, uids: list[str]) -> list[str]:
+        """Put downloaded mods into the active profile, on, at the top."""
+        added = [u for u in uids if u in self.mods and u not in self.members]
+        for u in added:
+            self.members.add(u)
+            self.mods[u].enabled = True
+        self.set_order(added + [u for u in self.order if u not in added])
+        return added
+
+    def remove_from_profile(self, uid: str) -> None:
+        """Take a mod out of the active profile; its files stay for other profiles."""
+        if uid in self.members:
+            self.members.discard(uid)
+            self.mods[uid].enabled = False
+            self._pin()
+
+    def profiles_with(self, uid: str) -> list[str]:
+        """Names of the profiles a mod is in."""
+        out = []
+        for name, prof in self.profiles.items():
+            inside = uid in self.members if name == self.active_profile else any(u == uid for u, _ in prof.entries)
+            if inside:
+                out.append(name)
+        return sorted(out, key=str.lower)
+
+    def not_in_profile(self) -> list[InstalledMod]:
+        """Downloaded mods the active profile doesn't have (to add them without downloading)."""
+        return [self.mods[u] for u in self.order if u in self.mods and u not in self.members]
+
+    # kept for callers from before profiles were live
+    def snapshot(self, name: str) -> Profile:
+        prof = self.new_profile(name, copy=True)
+        self.switch(name)
+        return prof
+
+    def restore(self, name: str) -> list[str]:
+        return self.switch(name)
 
 
 # ---------------------------------------------------------------------- locking

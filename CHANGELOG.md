@@ -3,6 +3,35 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.11.0 — 2026-10-28
+
+### Changed
+- **Profiles are separate setups now** (Ham's request, the way Deadlock Mod
+  Manager does it). Each profile has its own mods, load order and on/off, and
+  Installed only shows the profile you're on. Changes save into it as you make
+  them (no more "Save current setup"). Mods are still downloaded only once and
+  shared between profiles, so switching is instant.
+  - Switch from the new profile box at the top of Installed, or on Profiles.
+  - **Add downloaded mods…** (Installed) puts mods you already have, from other
+    profiles or none, into this one without downloading them again. In Browse
+    they show as "Downloaded", and installing one just adds it.
+  - **Remove from profile** takes a mod out of this profile and keeps its files;
+    **Uninstall** deletes it everywhere (and says which other profiles had it).
+  - Profiles: **New profile…** (empty or a copy) and **Duplicate**. You can't
+    delete the profile you're on.
+  - Coming from an older version: each profile keeps the mods that were on in
+    it, and the one you were using keeps what's on right now. Mods that were off
+    everywhere stay downloaded; "Add downloaded mods…" brings them back.
+
+### Fixed
+- **Mods listed twice.** An older bug could write a mod into the load order twice,
+  so it showed up twice in Installed (e.g. "101" for 98 mods). Repeats are
+  cleaned up on start and can't come back.
+- Tick boxes inside lists (adding mods, collections) were invisible until ticked
+  in some themes.
+- Your old saved state is kept as `state.before-1.11.json` the first time 1.11
+  starts, just in case.
+
 ## 1.10.0 — 2026-10-28
 
 ### Added

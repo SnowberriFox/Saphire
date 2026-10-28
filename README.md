@@ -90,8 +90,10 @@ To uninstall: `./uninstall.sh` (keeps your mod library) or `./uninstall.sh --pur
   Drag rows, use the move buttons or type the number a mod should have. **Lock** a
   mod (there, in the side panel or by right-clicking it) to keep it at its number
   while you reorder, install or remove everything else.
-- **Profiles**: save a setup (which mods are on plus their order) and switch in one
-  click.
+- **Profiles**: separate setups, each with its own mods, order and on/off (switch
+  from the Installed page or Profiles). Installed only shows the profile you're
+  on and changes save into it as you go. Mods are downloaded once and shared:
+  "Add downloaded mods…" brings ones from other profiles in without downloading.
 - **Downloads**: a page listing every install and update with progress, cancel and
   retry. Downloads run one at a time in the order you started them.
 - **Discord**: optional Rich Presence (Settings → Discord). It needs a Discord

@@ -142,7 +142,7 @@ def test_import_dmm_end_to_end(tmp_path, no7z):
     assert len(hud.vpks) == 2    # the other variant is kept, switched off
     assert mgr.lib.order == ["gb-Mod-222", "gb-Mod-111", "gb-Sound-333"]   # DMM installOrder
     assert mgr.lib.mods["gb-Sound-333"].enabled is False
-    assert set(mgr.lib.profiles) == {"Main", "Quiet"}
+    assert set(mgr.lib.profiles) == {"Default", "Main", "Quiet"}   # Default: the one you're on
     assert dict(mgr.lib.profiles["Quiet"].entries) == {"gb-Mod-111": True, "gb-Mod-222": False, "gb-Sound-333": False}
     mgr.apply()
     names = sorted(p.name for p in (game / "game/citadel/addons").iterdir())
@@ -343,7 +343,7 @@ def test_profiles_only_import_and_refresh(tmp_path, no7z):
     mgr = Manager(Library(), FakeGB({}, {}, {}))
     mgr.set_game_dir(game)
     mgr.apply()                     # adopts Grimoire's live files with their ids, no profiles yet
-    assert mgr.lib.profiles == {}
+    assert set(mgr.lib.profiles) == {"Default"}   # always one profile: the one you're on
     plan = mgr.plan_import("grimoire")
     res = mgr.run_import(plan, profiles_only=True)
     assert res["profiles"] == 1 and res["imported"] == 0
@@ -355,10 +355,10 @@ def test_profiles_only_import_and_refresh(tmp_path, no7z):
     mgr.save_profile("Everything")
     assert mgr.lib.profiles["Everything"].origin == ""
     mgr.run_import(plan, profiles_only=True)
-    assert set(mgr.lib.profiles) == {"Everything", "Everything (Grimoire)"}
+    assert set(mgr.lib.profiles) == {"Default", "Everything", "Everything (Grimoire)"}
     # but re-importing again refreshes the imported one in place
     mgr.run_import(plan, profiles_only=True)
-    assert set(mgr.lib.profiles) == {"Everything", "Everything (Grimoire)"}
+    assert set(mgr.lib.profiles) == {"Default", "Everything", "Everything (Grimoire)"}
 
 
 def test_force_apply_rewrites_everything(tmp_path, no7z):

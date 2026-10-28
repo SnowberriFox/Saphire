@@ -162,10 +162,13 @@ class Manager:
     def install_gamebanana(self, model: str, gb_id: int, file: GBFile | None = None,
                            choose: Chooser | None = None, progress: Progress | None = None,
                            cancel: threading.Event | None = None, add: bool = False,
-                           into: str | None = None, enabled: bool | None = None) -> InstalledMod:
+                           into: str | None = None, enabled: bool | None = None,
+                           to_profile: bool | None = None) -> InstalledMod:
         """Install one of a mod's files. By default it replaces the mod's main entry;
         `add=True` keeps what's there and installs the file as an extra entry beside it
-        (for optional add-on files); `into` reinstalls a specific existing entry."""
+        (for optional add-on files); `into` reinstalls a specific existing entry.
+        `to_profile`: put it in the active profile (default: new mods yes, a mod
+        that's already downloaded keeps whichever profiles it's in)."""
         details = self.gb.details(model, gb_id)
         sub = details.submission
         if file is None:
@@ -218,12 +221,17 @@ class Manager:
                     author=sub.author, category=sub.category_label, thumb_url=sub.thumb_url,
                     nsfw=sub.nsfw, file_id=file.id, file_name=file.filename,
                     file_date=file.date_added, vpks=stored,
-                    enabled=existing.enabled if existing else (True if enabled is None else enabled),
+                    enabled=False,
                     installed_at=existing.installed_at if existing else now, updated_at=now,
                     audio_url=sub.audio_url,
                     previous=prior if keep else (existing.previous if existing else None),
                 )
-                self.lib.add(mod, top=True)
+                member = to_profile if to_profile is not None else (existing is None or uid in self.lib.members)
+                if existing is not None and uid in self.lib.members:
+                    mod.enabled = existing.enabled
+                elif member:
+                    mod.enabled = True if enabled is None else enabled
+                self.lib.add(mod, top=True, member=member)
                 self.lib.mods[uid] = mod
                 if mod.enabled and not existing:
                     self._one_skin_per_hero(uid)
@@ -249,7 +257,7 @@ class Manager:
                 now = int(time.time())
                 mod = InstalledMod(uid=uid, name=existing.name if existing else name,
                                    source="local", file_name=path.name, vpks=stored,
-                                   enabled=existing.enabled if existing else True,
+                                   enabled=existing.enabled if existing and uid in self.lib.members else True,
                                    installed_at=now, updated_at=now)
                 self.lib.add(mod, top=True)
                 self.lib.mods[uid] = mod
@@ -423,7 +431,8 @@ class Manager:
         return heroes.surprises(self.hero_changes(mod), mod.name, mod.category, mod.model, self.hero_index())
 
     def skins_for(self, hero: str) -> list[InstalledMod]:
-        return [m for m in self.lib.ordered() if self.hero_of(m) == hero]
+        """The active profile's skins for a hero."""
+        return [m for m in self.lib.visible() if self.hero_of(m) == hero]
 
     def _one_skin_per_hero(self, uid: str) -> list[InstalledMod]:
         """With the setting on, switch off the other enabled skins for this mod's hero."""
@@ -631,6 +640,8 @@ class Manager:
             self.lib.order.clear()
             self.lib.profiles.clear()
             self.lib.active_profile = None
+            self.lib.members = set()
+            self.lib._ensure_profile()
             self.lib.save()
             self._first = []
             self.camera_report = {}
@@ -809,7 +820,7 @@ class Manager:
                     # Off for now: it belongs to the imported profile, not the current setup.
                     mod = self.install_gamebanana(e["model"], e["gb_id"], target, choose=pick,
                                                   progress=progress, cancel=cancel, add=e.get("extra", False),
-                                                  enabled=False)
+                                                  enabled=False, to_profile=False)
                     downloaded += 1
                 except Cancelled:
                     raise
@@ -828,23 +839,59 @@ class Manager:
         return {"downloaded": downloaded, "failed": failed, "missing": missing}
 
     # ---------------------------------------------------------------- profiles
+    # Profiles are separate, live setups; see Library. Changes save as you make them.
     def save_profile(self, name: str) -> None:
+        """Copy the active profile as `name` and switch to the copy."""
         with self.lock:
             self.lib.snapshot(name.strip())
             self.lib.save()
 
     def load_profile(self, name: str) -> list[str]:
+        """Switch to a profile. Returns uids it listed that are gone."""
         with self.lock:
-            missing = self.lib.restore(name)
+            missing = self.lib.switch(name)
             self.lib.save()
             self._dirty = True
             return missing
 
+    def new_profile(self, name: str, copy: bool = False) -> None:
+        with self.lock:
+            name = name.strip()
+            if not name or name in self.lib.profiles:
+                raise ManagerError("Pick a different name.")
+            self.lib.new_profile(name, copy=copy)
+            self.lib.save()
+
+    def duplicate_profile(self, src: str, name: str) -> None:
+        with self.lock:
+            name = name.strip()
+            if not name or name in self.lib.profiles or src not in self.lib.profiles:
+                raise ManagerError("Pick a different name.")
+            self.lib.copy_profile(src, name)
+            self.lib.save()
+
+    def add_to_profile(self, uids: list[str]) -> list[str]:
+        """Put already-downloaded mods into the active profile (no download)."""
+        with self.lock:
+            added = self.lib.add_to_profile(uids)
+            for uid in added:
+                self._one_skin_per_hero(uid)
+            self.lib.save()
+            self._dirty = True
+            return added
+
+    def remove_from_profile(self, uid: str) -> None:
+        """Take a mod out of the active profile; it stays downloaded."""
+        with self.lock:
+            self.lib.remove_from_profile(uid)
+            self.lib.save()
+            self._dirty = True
+
     def delete_profile(self, name: str) -> None:
         with self.lock:
+            if name == self.lib.active_profile:
+                raise ManagerError("That's the profile you're using. Switch to another one first.")
             self.lib.profiles.pop(name, None)
-            if self.lib.active_profile == name:
-                self.lib.active_profile = None
             self.lib.save()
 
     def rename_profile(self, old: str, new: str) -> None:
