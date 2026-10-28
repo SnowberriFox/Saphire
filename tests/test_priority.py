@@ -243,3 +243,16 @@ def test_saves_from_several_threads_dont_collide():
     assert errors == []
     assert Library(lib.path).order == list("ABC")
     assert not list(lib.path.parent.glob("*.tmp"))
+
+
+def test_old_hide_18plus_tick_box_carries_over(tmp_path):
+    import json
+    for old, new in ((True, "hide"), (False, "show")):
+        path = tmp_path / f"state-{old}.json"
+        path.write_text(json.dumps({"settings": {"hide_nsfw": old}, "mods": {}, "order": []}))
+        assert Library(path).settings.nsfw == new
+    path = tmp_path / "state-new.json"
+    path.write_text(json.dumps({"settings": {"nsfw": "only"}, "mods": {}, "order": []}))
+    assert Library(path).settings.nsfw == "only"
+    path.write_text(json.dumps({"settings": {"nsfw": "bogus"}, "mods": {}, "order": []}))
+    assert Library(path).settings.nsfw == "hide"

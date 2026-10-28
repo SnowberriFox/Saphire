@@ -3,6 +3,16 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.9.3 — 2026-10-28
+
+### Changed
+- **18+ mods filter has three settings** (Browse → Show → 18+ mods), Ham's
+  request: **Hide them** (the default), **Show them too**, or **Only 18+**.
+  GameBanana can't list "all mature mods" in one go (it filters one content
+  rating at a time), so "Only 18+" looks through the pages itself and keeps
+  going until the view fills; the count says how far it's got. Your old "Hide
+  18+ mods" tick carries over.
+
 ## 1.9.2 — 2026-10-28
 
 ### Changed

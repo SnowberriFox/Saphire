@@ -714,8 +714,16 @@ class FilterPanel(QWidget):
         show_title = QLabel("Show")
         show_title.setObjectName("SideTitle")
         lay.addWidget(show_title)
-        self.hide_nsfw = QCheckBox("Hide 18+ mods")
-        self.hide_nsfw.setChecked(settings.hide_nsfw)
+        nsfw_row = QHBoxLayout()
+        nsfw_row.addWidget(QLabel("18+ mods"))
+        self.nsfw = QComboBox()
+        for label, key in (("Hide them", "hide"), ("Show them too", "show"), ("Only 18+", "only")):
+            self.nsfw.addItem(label, key)
+        self.nsfw.setToolTip("Mods GameBanana marks as mature (any content rating). "
+                             "\"Only 18+\" looks through more pages to find them, so it can take a moment.")
+        self.nsfw.setCurrentIndex(max(0, self.nsfw.findData(settings.nsfw)))
+        self.nsfw.currentIndexChanged.connect(self.changed)
+        nsfw_row.addWidget(self.nsfw, 1)
         self.hide_installed = QCheckBox("Hide mods I have")
         self.hide_installed.setChecked(settings.hide_installed)
         self.hide_obsolete = QCheckBox("Hide outdated mods")
@@ -723,7 +731,8 @@ class FilterPanel(QWidget):
         self.favourites_only = QCheckBox("Only my favourites ★")
         self.favourites_only.setToolTip("Show the mods you starred (works offline)")
         self.favourites_only.setChecked(settings.favourites_only)
-        for cb in (self.favourites_only, self.hide_nsfw, self.hide_installed, self.hide_obsolete):
+        lay.addLayout(nsfw_row)
+        for cb in (self.favourites_only, self.hide_installed, self.hide_obsolete):
             cb.toggled.connect(self.changed)
             lay.addWidget(cb)
 
@@ -955,7 +964,7 @@ class BrowsePage(QWidget):
 
     def _filters_changed(self):
         s = self.mgr.lib.settings
-        s.hide_nsfw = self.filters.hide_nsfw.isChecked()
+        s.nsfw = self.filters.nsfw.currentData()
         s.hide_installed = self.filters.hide_installed.isChecked()
         s.hide_obsolete = self.filters.hide_obsolete.isChecked()
         s.favourites_only = self.filters.favourites_only.isChecked()
@@ -1014,7 +1023,11 @@ class BrowsePage(QWidget):
             QTimer.singleShot(0, lambda t=token, n=len(subs): self._got_page(
                 Page(items=subs, total=n, complete=True, page=1), t, favourites=True))
             return
-        run(self.client.browse, self.filters.model, page, self.per_page,
+        # Only about one mod in ten is 18+, so "Only 18+" asks for the biggest pages
+        # GameBanana allows and keeps going until the view fills (_maybe_fill).
+        per_page = 50 if self.filters.nsfw.currentData() == "only" else self.per_page
+        self._page_size = per_page
+        run(self.client.browse, self.filters.model, page, per_page,
             self.filters.search.text(), cat, self.filters.sort.currentData(),
             self.submitter[0] if self.submitter else None,
             on_done=lambda pg, t=token: self._got_page(pg, t),
@@ -1028,15 +1041,19 @@ class BrowsePage(QWidget):
         self._total = page.total
         raw_count = len(page.items)
         items = page.items
-        if self.filters.hide_nsfw.isChecked():
+        nsfw = self.filters.nsfw.currentData()
+        if nsfw == "hide":
             items = [s for s in items if not s.nsfw]
+        elif nsfw == "only":
+            items = [s for s in items if s.nsfw]
         if self.filters.hide_obsolete.isChecked():
             items = [s for s in items if not s.obsolete]
         if self.filters.hide_installed.isChecked():
             items = [s for s in items if not self.mgr.lib.by_gb(s.model, s.id)]
         self.model.extend(items)
         self._shown = len(self.model.items)
-        self._complete = page.complete or raw_count == 0 or page.page * self.per_page >= page.total
+        size = self.per_page if favourites else getattr(self, "_page_size", self.per_page)
+        self._complete = page.complete or raw_count == 0 or page.page * size >= page.total
         noun = "sounds" if self.filters.model == "Sound" else "mods"
         if self._shown == 0 and self._complete:
             self.grid.hide()
@@ -1047,8 +1064,16 @@ class BrowsePage(QWidget):
             self.message.show()
             self.result_label.setText("")
             return
-        self.result_label.setText(f"{page.total:,} favourite {noun}" if favourites
-                                  else f"{page.total:,} {noun} on GameBanana")
+        if favourites:
+            self.result_label.setText(f"{page.total:,} favourite {noun}")
+        elif nsfw == "only":
+            # GameBanana can't count these for us: say how far the search has got
+            checked = min(page.total, page.page * size)
+            one = noun[:-1] if self._shown == 1 else noun
+            self.result_label.setText(f"{self._shown:,} 18+ {one}" if self._complete else
+                                      f"{self._shown:,} 18+ {one} so far (looked through {checked:,} of {page.total:,})")
+        else:
+            self.result_label.setText(f"{page.total:,} {noun} on GameBanana")
         # Keep pulling pages until the view can scroll (filters may hide a lot).
         QTimer.singleShot(0, self._maybe_fill)
 

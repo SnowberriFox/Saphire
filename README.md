@@ -71,7 +71,8 @@ To uninstall: `./uninstall.sh` (keeps your mod library) or `./uninstall.sh --pur
   every part of the interface, and four interface sizes. Browse has a Grid/List
   toggle.
 - **Browse**: live GameBanana catalogue. Filter by category or hero (type to find
-  one), sort, search, switch between mods and sounds, hide 18+, outdated or
+  one), sort, search, switch between mods and sounds, hide or show 18+ mods (or
+  only 18+ ones), hide outdated or
   already-installed mods. Click an author's name to see everything they've made.
   Paste a GameBanana link to install it directly.
 - **Installed**: drag to set priority, in the list or the grid. **#1 wins** when

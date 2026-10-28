@@ -566,6 +566,29 @@ def main():
         print("deployed after install:", addons)
         pixel_themes()
 
+    def nsfw_only():
+        # Ham's three-way 18+ filter (1.9.3): "Only 18+" keeps fetching until it has them all
+        win.go(0)
+        f = win.browse.filters
+        f.nsfw.setCurrentIndex(f.nsfw.findData("only"))
+
+        def check(tries=0):
+            if not win.browse._complete and tries < 40:
+                return QTimer.singleShot(150, lambda: check(tries + 1))
+            items = win.browse.model.items
+            print("only 18+:", len(items), "shown, all 18+:", all(x.nsfw for x in items),
+                  "| label:", win.browse.result_label.text(), "| saved:", mgr.lib.settings.nsfw)
+            shot("22-only-18plus")
+            f.nsfw.setCurrentIndex(f.nsfw.findData("show"))
+            f.search.setText(ALL[7].name)          # the 18+ one: shown alongside the rest
+            QTimer.singleShot(900, lambda: (print("show them too, searching the 18+ mod:",
+                                                  [x.name for x in win.browse.model.items if x.nsfw]),
+                                            f.nsfw.setCurrentIndex(f.nsfw.findData("hide")),
+                                            QTimer.singleShot(900, lambda: (print("hide, same search:",
+                                                  [x.name for x in win.browse.model.items if x.nsfw]),
+                                                  f.search.setText(""), app.quit()))))
+        QTimer.singleShot(300, check)
+
     def pixel_themes():
         # Ham's Undertale/Deltarune themes (1.9.0)
         st = mgr.lib.settings
@@ -580,7 +603,7 @@ def main():
                 win.settings.font_boxes["text"].setCurrentIndex(0)
                 win.settings.preset_box.setCurrentText("Sapphire")
                 print("pixel themes: back to", theme.PRESET, "pixel:", theme.PIXEL, "font:", theme.BODY_FAMILY)
-                app.quit()
+                nsfw_only()
                 return
             preset, page, name, font = shots[i]
             if st.theme_preset != preset:

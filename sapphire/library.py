@@ -109,7 +109,7 @@ class Profile:
 
 @dataclass
 class Settings:
-    hide_nsfw: bool = True
+    nsfw: str = "hide"               # Browse: 18+ mods "hide", "show" (with the rest) or "only"
     hide_installed: bool = False
     hide_obsolete: bool = True
     auto_apply: bool = True
@@ -162,7 +162,11 @@ class Library:
                 pass
             return
         self.game_dir = data.get("game_dir")
-        s = data.get("settings") or {}
+        s = dict(data.get("settings") or {})
+        if "nsfw" not in s and "hide_nsfw" in s:      # before 1.9.3 it was a tick box
+            s["nsfw"] = "hide" if s.get("hide_nsfw") else "show"
+        if s.get("nsfw") not in ("hide", "show", "only"):
+            s.pop("nsfw", None)
         self.settings = Settings(**{k: v for k, v in s.items() if k in Settings.__dataclass_fields__})
         if not isinstance(self.settings.theme_colors, dict):
             self.settings.theme_colors = {}

@@ -35,7 +35,7 @@ class CollectionDialog(QDialog):
         self.all_box.toggled.connect(self._select_all)
         row.addWidget(self.all_box)
         self.skip_nsfw = QCheckBox("Skip 18+ mods")
-        self.skip_nsfw.setChecked(manager.lib.settings.hide_nsfw)
+        self.skip_nsfw.setChecked(manager.lib.settings.nsfw == "hide")
         self.skip_nsfw.toggled.connect(lambda *_: self._fill())
         row.addWidget(self.skip_nsfw)
         row.addStretch(1)
