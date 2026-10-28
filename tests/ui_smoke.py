@@ -576,7 +576,7 @@ def main():
         def step(i=0):
             if i == len(shots):
                 print("picked font in use:", theme.BODY_FAMILY, "| text font options:",
-                      win.settings.font_boxes["text"].count())
+                      [win.settings.font_boxes["text"].itemText(i) for i in range(win.settings.font_boxes["text"].count())])
                 win.settings.font_boxes["text"].setCurrentIndex(0)
                 win.settings.preset_box.setCurrentText("Sapphire")
                 print("pixel themes: back to", theme.PRESET, "pixel:", theme.PIXEL, "font:", theme.BODY_FAMILY)

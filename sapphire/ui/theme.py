@@ -221,11 +221,6 @@ def log_name_mismatch(expected: str, actual: str) -> None:
     logging.getLogger(__name__).warning("font %s registered as %r", expected, actual)
 
 
-def system_fonts() -> list[str]:
-    """Fonts installed on this computer (not the bundled ones), for Settings."""
-    bundled = set(BUNDLED_FONTS)
-    return sorted({f for f in QFontDatabase.families() if f not in bundled and not f.startswith(".")},
-                  key=str.lower)
 
 
 def px(n: float) -> int:

@@ -315,7 +315,7 @@ class SettingsPage(QWidget):
             fonts.addSpacing(18)
         fonts.addStretch(1)
         root.addLayout(fonts)
-        font_hint = QLabel("Each theme suggests fonts that suit it; you can pick any font on your computer.")
+        font_hint = QLabel("Each theme suggests fonts that suit it; any font that comes with Sapphire works with any theme.")
         font_hint.setObjectName("Muted")
         root.addWidget(font_hint)
         self._fill_font_boxes()
@@ -499,13 +499,8 @@ class SettingsPage(QWidget):
             header("Also included with Sapphire")
             for fam in others:
                 add(fam)
-            system = theme.system_fonts()
-            if system:
-                header("On this computer")
-                for fam in system:
-                    add(fam)
             if current and box.findData(current) < 0:
-                add(current, f"{current} (not installed)")
+                add(current)        # picked in 1.9.1 from the computer's fonts: keep showing it
             box.setCurrentIndex(max(0, box.findData(current)))
             box.blockSignals(False)
 

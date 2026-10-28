@@ -3,6 +3,13 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.9.2 — 2026-10-28
+
+### Changed
+- The font lists only offer the theme's suggestions and the fonts that come with
+  Sapphire, not every font on your computer (that made the list huge and messy).
+  A font you already picked from your computer stays selected.
+
 ## 1.9.1 — 2026-10-28
 
 ### Added

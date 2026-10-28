@@ -67,7 +67,7 @@ To uninstall: `./uninstall.sh` (keeps your mod library) or `./uninstall.sh --pur
   reachable. Run it again any time from Settings.
 - **Appearance**: Settings → Appearance has eight themes (including Undertale and
   Deltarune fan themes with boxy menus), a text and title font setting (each theme
-  suggests fonts that suit it, or pick any font on your computer), a colour picker for
+  suggests fonts that suit it, plus every font that comes with Sapphire), a colour picker for
   every part of the interface, and four interface sizes. Browse has a Grid/List
   toggle.
 - **Browse**: live GameBanana catalogue. Filter by category or hero (type to find

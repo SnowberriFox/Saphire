@@ -69,3 +69,23 @@ def test_custom_colours_survive_a_plain_reapply(app):
     theme.apply(app)
     assert theme.ACCENT.lower() == "#ff00aa"
     theme.apply(app, "Sapphire", {})
+
+
+def test_font_lists_only_offer_sapphires_fonts(app):
+    from sapphire.core import Manager
+    from sapphire.library import Library
+    from sapphire.ui import theme
+    from sapphire.ui.pages import SettingsPage
+    lib = Library()
+    lib.settings.theme_preset = "Undertale"
+    page = SettingsPage(Manager(lib))
+    box = page.font_boxes["text"]
+    fonts = [box.itemData(i) for i in range(box.count()) if box.itemData(i)]
+    assert set(fonts) == set(theme.BUNDLED_FONTS)          # nothing from the computer
+    assert fonts[:6] == theme.recommended("text", "Undertale")   # suggestions first
+    assert box.itemText(0) == "Theme's choice (Chakra Petch)"
+    # a font picked from the computer in 1.9.1 still shows as selected
+    lib.settings.text_font = "DejaVu Sans"
+    page._fill_font_boxes()
+    assert box.currentData() == "DejaVu Sans"
+    theme.apply(app, "Sapphire", {}, 1.0, "", "")
