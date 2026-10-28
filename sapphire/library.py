@@ -129,6 +129,7 @@ class Settings:
     one_skin_per_hero: bool = False  # turning a skin on turns the hero's other skins off
     helper: bool = False             # background helper that keeps gameinfo.gi patched
     favourites_only: bool = False    # Browse filter
+    hero_tour: str = ""              # hero the Browse hero tour stopped at ("" = not started / finished)
     patch_notes: str = "update"      # show patch notes: "update", "always" or "never"
     seen_version: str = ""           # the version patch notes were last shown for
 

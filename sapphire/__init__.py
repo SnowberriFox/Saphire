@@ -1,5 +1,5 @@
 """Sapphire - a fast, reliable Deadlock mod manager for Linux."""
 
-__version__ = "1.9.3"
+__version__ = "1.10.0"
 APP_NAME = "Sapphire"
 APP_ID = "sapphire"

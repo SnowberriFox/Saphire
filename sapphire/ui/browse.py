@@ -766,6 +766,21 @@ class FilterPanel(QWidget):
         it = self.tree.currentItem()
         return it.data(0, Qt.UserRole) if it else None
 
+    def hero_categories(self) -> list[tuple[str, QTreeWidgetItem]]:
+        """Skins › <hero> categories, alphabetically (the hero tour walks these)."""
+        for i in range(self.tree.topLevelItemCount()):
+            top = self.tree.topLevelItem(i)
+            if top.text(0).lower() == "skins":
+                kids = [(top.child(j).text(0), top.child(j)) for j in range(top.childCount())]
+                return sorted(kids, key=lambda x: hero_key(x[0]))
+        return []
+
+    def select_category(self, item: QTreeWidgetItem):
+        if self.cat_filter.text():
+            self.cat_filter.clear()         # the item might be hidden by the tree's search
+        self.tree.setCurrentItem(item)     # emits changed -> Browse reloads
+        self.tree.scrollToItem(item)
+
     def category_matches(self, sub: Submission) -> bool:
         """Whether a submission sits in the chosen category (used for favourites,
         which are filtered here rather than by GameBanana)."""
@@ -815,6 +830,13 @@ class FilterPanel(QWidget):
             visit(self.tree.topLevelItem(i))
 
 
+
+def hero_key(name: str) -> str:
+    """Compare hero names loosely: "The Doorman" = "Doorman", "Mo & Krill" = "mo and krill"."""
+    n = name.lower().replace("&", "and").strip()
+    n = n[4:] if n.startswith("the ") else n
+    return "".join(c for c in n if c.isalnum())
+
 # ---------------------------------------------------------------- page
 
 class BrowsePage(QWidget):
@@ -850,6 +872,12 @@ class BrowsePage(QWidget):
         self.author_chip.clicked.connect(self.clear_author)
         top.addWidget(self.author_chip)
         top.addStretch(1)
+        self.tour_btn = QPushButton("Hero tour")
+        self.tour_btn.setToolTip("Go through every hero one at a time: see the skin you're using for them "
+                                 "and browse their skins")
+        self.tour_btn.clicked.connect(self.start_tour)
+        top.addWidget(self.tour_btn)
+        top.addSpacing(8)
         self.view_group = QButtonGroup(self)
         for i, (label, mode, tip) in enumerate((("Grid", "grid", "Big cards with previews"),
                                                  ("List", "list", "Compact rows, more mods on screen"))):
@@ -869,6 +897,31 @@ class BrowsePage(QWidget):
             self.view_group.button(0).setChecked(True)
         self.view_group.idToggled.connect(lambda i, on: on and self._view_changed(self.view_group.button(i).property("mode")))
         cl.addLayout(top)
+
+        # the hero tour's bar: who you're on, what you're using, back / next
+        self.tour_bar = QFrame()
+        self.tour_bar.setObjectName("Banner")
+        tb = QHBoxLayout(self.tour_bar)
+        tb.setContentsMargins(12, 8, 8, 8)
+        self.tour_info = QLabel()
+        self.tour_info.setWordWrap(True)
+        self.tour_info.setTextFormat(Qt.RichText)
+        self.tour_info.setStyleSheet("background: transparent;")
+        tb.addWidget(self.tour_info, 1)
+        self.tour_back = QPushButton("◀ Back")
+        self.tour_back.clicked.connect(lambda: self._tour_go(self._tour_i - 1))
+        self.tour_next = QPushButton("Next ▶")
+        self.tour_next.setProperty("kind", "primary")
+        self.tour_next.clicked.connect(self._tour_forward)
+        tour_end = QPushButton("End tour")
+        tour_end.clicked.connect(self.end_tour)
+        for b in (self.tour_back, self.tour_next, tour_end):
+            tb.addWidget(b, 0, Qt.AlignVCenter)
+        self.tour_bar.hide()
+        cl.addWidget(self.tour_bar)
+        self._tour: list[str] = []          # hero names, alphabetically
+        self._tour_i = 0
+        self._tour_tries = 0
 
         self.grid = CardGrid()
         self.model = SubmissionModel()
@@ -915,6 +968,114 @@ class BrowsePage(QWidget):
         self._total = 0
         self._shown = 0
         self._cats_loaded_for = None
+        self._tour_label()
+
+    # ------------------------------------------------------------ hero tour
+    def _tour_label(self):
+        at = self.mgr.lib.settings.hero_tour
+        self.tour_btn.setText(f"Continue hero tour ({at})" if at else "Hero tour")
+
+    def start_tour(self):
+        """Walk through every hero's skins, alphabetically (Ham's idea)."""
+        f = self.filters
+        if f.model != "Mod":
+            f.type_group.button(0).setChecked(True)   # skins are mods, not sounds (reloads the categories)
+        heroes = [name for name, _item in f.hero_categories()]
+        if not heroes:
+            # categories load in the background: try again shortly
+            self._tour_tries += 1
+            if self._tour_tries <= 20:
+                QTimer.singleShot(250, self.start_tour)
+            else:
+                self.status.emit("Couldn't load the hero list from GameBanana. Try again in a moment.")
+                self._tour_tries = 0
+            return
+        self._tour_tries = 0
+        self._tour = heroes
+        at = self.mgr.lib.settings.hero_tour
+        start = heroes.index(at) if at in heroes else 0
+        self.tour_bar.show()
+        self.tour_btn.hide()
+        self._tour_go(start)
+
+    def _tour_forward(self):
+        if self._tour_i + 1 >= len(self._tour):
+            self.end_tour(finished=True)
+        else:
+            self._tour_go(self._tour_i + 1)
+
+    def _tour_go(self, i: int):
+        if not self._tour:
+            return
+        self._tour_i = max(0, min(i, len(self._tour) - 1))
+        hero = self._tour[self._tour_i]
+        f = self.filters
+        # look the category up each time: the tree is rebuilt whenever categories reload
+        item = dict(f.hero_categories()).get(hero)
+        if item is None:
+            self.status.emit(f"GameBanana has no skins category for {hero} right now.")
+            return
+        # a clean view of this hero's skins: no search, author or favourites filter
+        for w, clear in ((f.search, lambda: f.search.clear()),
+                         (f.favourites_only, lambda: f.favourites_only.setChecked(False))):
+            w.blockSignals(True)
+            clear()
+            w.blockSignals(False)
+        if self.submitter:
+            self.submitter = None
+            self.author_chip.hide()
+        if f.tree.currentItem() is item:
+            self._filters_changed()
+        else:
+            f.select_category(item)
+        self.mgr.lib.settings.hero_tour = hero
+        self.mgr.lib.save()
+        self._tour_refresh()
+
+    def _tour_refresh(self):
+        if not self._tour or not self.tour_bar.isVisible():
+            return
+        import html
+        hero = self._tour[self._tour_i]
+        n, total = self._tour_i + 1, len(self._tour)
+        on, off = self.mods_for_hero(hero)
+        if on:
+            names = ", ".join(f"<b>{html.escape(m.name)}</b>" for m in on)
+            using = f"Using {names}" + (" (the first one wins where they clash)" if len(on) > 1 else "")
+        else:
+            using = "Using the default look (no skin on)"
+        extra = (f"<br>Installed but off: {html.escape(', '.join(m.name for m in off))}" if off else "")
+        self.tour_info.setText(f"<span style='font-size:{theme.fpx(15)}px'><b>{html.escape(hero)}</b></span>"
+                               f"&nbsp;&nbsp;hero {n} of {total}<br>{using}{extra}")
+        self.tour_back.setEnabled(self._tour_i > 0)
+        self.tour_next.setText(f"Next: {self._tour[self._tour_i + 1]} ▶" if n < total else "Finish ✓")
+
+    def mods_for_hero(self, hero: str):
+        """(on, off) installed mods that change this hero's look, in load order."""
+        want = hero_key(hero)
+        on, off = [], []
+        for m in self.mgr.lib.ordered():
+            hit = False
+            cat = m.category.split(" › ")
+            if len(cat) == 2 and cat[0].lower() == "skins" and hero_key(cat[1]) == want:
+                hit = True
+            else:
+                try:
+                    hit = any(hero_key(h) == want for h in self.mgr.hero_changes(m).reskinned)
+                except Exception:  # noqa: BLE001 - a hint, never worth breaking Browse
+                    hit = False
+            if hit:
+                (on if m.enabled else off).append(m)
+        return on, off
+
+    def end_tour(self, finished: bool = False):
+        self.tour_bar.hide()
+        self.tour_btn.show()
+        if finished:
+            self.mgr.lib.settings.hero_tour = ""
+            self.mgr.lib.save()
+            self.status.emit("That's every hero. Hero tour finished.")
+        self._tour_label()
 
     # --------------------------------------------------------------- state
     def _install_state(self, sub: Submission):
@@ -947,6 +1108,7 @@ class BrowsePage(QWidget):
     def library_changed(self):
         self.model.refresh_all()
         self.detail.refresh()
+        self._tour_refresh()      # e.g. you just installed this hero's skin
         if self.filters.hide_installed.isChecked():
             self.reload()
 

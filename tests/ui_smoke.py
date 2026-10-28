@@ -566,6 +566,37 @@ def main():
         print("deployed after install:", addons)
         pixel_themes()
 
+    def hero_tour():
+        # Ham's hero tour (1.10.0): one hero at a time, with what you're using for them
+        b = win.browse
+        mgr.lib.settings.hero_tour = ""
+        b.start_tour()
+
+        def step1():
+            first = b._tour[0]
+            print("tour:", len(b._tour), "heroes, first:", first, "| category:", b.filters.tree.currentItem().text(0),
+                  "| next:", b.tour_next.text())
+            b._tour_go(b._tour.index("Haze"))
+            QTimer.singleShot(700, step2)
+
+        def step2():
+            print("tour at Haze:", b.tour_info.text().replace("<br>", " / ")[:220])
+            shot("23-hero-tour")
+            b._tour_forward()
+            QTimer.singleShot(400, step3)
+
+        def step3():
+            at = b._tour[b._tour_i]
+            b.end_tour()
+            print("after next:", at, "| category:", b.filters.tree.currentItem().text(0),
+                  "| button:", b.tour_btn.text(), "| saved:", mgr.lib.settings.hero_tour)
+            b.start_tour()
+            QTimer.singleShot(400, lambda: (print("resumed at:", b._tour[b._tour_i]),
+                                            b._tour_go(len(b._tour) - 1), b._tour_forward(),
+                                            print("finished: saved =", repr(mgr.lib.settings.hero_tour),
+                                                  "| button:", b.tour_btn.text()), app.quit()))
+        QTimer.singleShot(900, step1)
+
     def nsfw_only():
         # Ham's three-way 18+ filter (1.9.3): "Only 18+" keeps fetching until it has them all
         win.go(0)
@@ -586,7 +617,7 @@ def main():
                                             f.nsfw.setCurrentIndex(f.nsfw.findData("hide")),
                                             QTimer.singleShot(900, lambda: (print("hide, same search:",
                                                   [x.name for x in win.browse.model.items if x.nsfw]),
-                                                  f.search.setText(""), app.quit()))))
+                                                  f.search.setText(""), hero_tour()))))
         QTimer.singleShot(300, check)
 
     def pixel_themes():

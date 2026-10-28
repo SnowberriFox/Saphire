@@ -75,6 +75,9 @@ To uninstall: `./uninstall.sh` (keeps your mod library) or `./uninstall.sh --pur
   only 18+ ones), hide outdated or
   already-installed mods. Click an author's name to see everything they've made.
   Paste a GameBanana link to install it directly.
+- **Hero tour** (Browse → Hero tour): goes through every hero alphabetically,
+  shows the skin you're using for each one and lists their skins; Next moves on.
+  It remembers where you stopped.
 - **Installed**: drag to set priority, in the list or the grid. **#1 wins** when
   two mods change the same file. Each mod shows whether it wins or gets
   overridden, and the side panel lists the exact files. Tick boxes turn mods on

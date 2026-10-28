@@ -3,6 +3,18 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.10.0 — 2026-10-28
+
+### Added
+- **Hero tour** (Browse → Hero tour), Ham's idea. Goes through every hero
+  alphabetically (all of GameBanana's Skins categories, Hero Labs heroes
+  included). For each one a bar shows the skin you're using for them (or that
+  they're on their default look) and any of their skins you have switched off,
+  and Browse switches to that hero's skins. Back and Next move between heroes;
+  End tour stops, and the button then says "Continue hero tour (Lash)" so you
+  can pick up where you left off. If you install a skin along the way, the bar
+  updates straight away.
+
 ## 1.9.3 — 2026-10-28
 
 ### Changed
