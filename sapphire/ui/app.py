@@ -109,6 +109,7 @@ class MainWindow(QMainWindow):
         self.browse = BrowsePage(manager, self.images)
         self.installed = InstalledPage(manager, self.images)
         self.installed.busy = lambda uid: self.jobs.active_for(f"mod:{uid}") is not None
+        self.installed.running = lambda: self.running
         self.profiles = ProfilesPage(manager)
         self.downloads = DownloadsPage(self.jobs)
         self.crosshair = CrosshairPage(manager)
@@ -147,6 +148,8 @@ class MainWindow(QMainWindow):
         self.installed.status.connect(self.say)
         self.installed.priority_requested.connect(self.edit_priority)
         self.installed.profile_switch_requested.connect(self.switch_profile)
+        self.installed.focus_requested.connect(lambda: self.go(1))
+        self.installed.find_like_requested.connect(self._find_like)
         self.browse.collection_requested.connect(self.open_collection)
         self.crosshair.status.connect(self.say)
         self.profiles.import_requested.connect(self.import_profile_file)
@@ -282,6 +285,9 @@ class MainWindow(QMainWindow):
         self.launch_btn.setText("Deadlock is running" if self.running else "Launch Deadlock")
         if self.running and self.mgr.pending:
             self._show_banner("Deadlock is running, so your changes will be applied as soon as you close it.")
+        elif self.running:
+            self._show_banner("Deadlock is running. Want to change a mod after this match? Right-click it on "
+                              "Installed and pick Remind me later.")
         elif not gd:
             self._show_banner("Sapphire couldn't find Deadlock. Go to Settings and choose its folder.", bad=True)
         else:
@@ -329,6 +335,16 @@ class MainWindow(QMainWindow):
     def _after_game_closed(self):
         if self.mgr.pending and self.mgr.lib.settings.auto_apply:
             self.apply_now()
+        if self.installed.review_later(after_game=True):   # what you queued mid-match
+            self.go(1)
+            self.raise_()
+            self.activateWindow()
+
+    def _find_like(self, uid: str):
+        mod = self.mgr.lib.mods.get(uid)
+        if mod:
+            self.go(0)
+            self.browse.find_like(mod)
 
     def _watch_gameinfo(self):
         gd = self.mgr.lib.game_dir

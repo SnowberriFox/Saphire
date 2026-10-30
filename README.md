@@ -94,6 +94,10 @@ To uninstall: `./uninstall.sh` (keeps your mod library) or `./uninstall.sh --pur
   from the Installed page or Profiles). Installed only shows the profile you're
   on and changes save into it as you go. Mods are downloaded once and shared:
   "Add downloaded mods…" brings ones from other profiles in without downloading.
+- **Queued for later**: spotted a mod you want to change mid-match? Right-click it
+  → **Remind me later…** and pick what to do (change its variant, swap it for a
+  different mod, get rid of it, or just a note). When Deadlock closes, Sapphire
+  shows the list with a button to deal with each one.
 - **Downloads**: a page listing every install and update with progress, cancel and
   retry. Downloads run one at a time in the order you started them.
 - **Discord**: optional Rich Presence (Settings → Discord). It needs a Discord

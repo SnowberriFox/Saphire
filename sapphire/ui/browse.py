@@ -1069,6 +1069,54 @@ class BrowsePage(QWidget):
                 (on if m.enabled else off).append(m)
         return on, off
 
+    def category_item(self, path: str):
+        """The tree item for a category like "Skins › Abrams" (or "Skins"), if loaded."""
+        parts = [x.strip().lower() for x in path.split("›") if x.strip()]
+        tree = self.filters.tree
+        if not parts:
+            return None
+        for i in range(tree.topLevelItemCount()):
+            top = tree.topLevelItem(i)
+            if top.text(0).strip().lower() != parts[0]:
+                continue
+            if len(parts) == 1:
+                return top
+            want = hero_key(parts[1])
+            for j in range(top.childCount()):
+                if hero_key(top.child(j).text(0)) == want:
+                    return top.child(j)
+            return top              # the sub-category's gone: the main one is close enough
+        return None
+
+    def find_like(self, mod, _tries: int = 0):
+        """Browse the category a mod is in, to swap it for a different one."""
+        f = self.filters
+        want = "Sound" if mod.model == "Sound" else "Mod"
+        if f.model != want:
+            f.type_group.button(0 if want == "Mod" else 1).setChecked(True)   # reloads the categories
+        self.start()
+        item = self.category_item(mod.category) if mod.category else None
+        if mod.category and item is None and _tries < 20:
+            QTimer.singleShot(250, lambda: self.find_like(mod, _tries + 1))   # categories still loading
+            return
+        for w, clear in ((f.search, lambda: f.search.clear()),
+                         (f.favourites_only, lambda: f.favourites_only.setChecked(False))):
+            w.blockSignals(True)
+            clear()
+            w.blockSignals(False)
+        if self.submitter:
+            self.submitter = None
+            self.author_chip.hide()
+        if item is None and f.tree.topLevelItemCount():
+            item = f.tree.topLevelItem(0)          # "Everything"
+        if item is not None and f.tree.currentItem() is not item:
+            f.select_category(item)
+        else:
+            self._filters_changed()
+        where = item.text(0) if item is not None and item.data(0, Qt.UserRole) is not None else "every category"
+        self.status.emit(f"Showing {where}, to find something to replace {mod.name}. Once you've installed "
+                         "one, mark it done on the Queued for later list.")
+
     def end_tour(self, finished: bool = False):
         self.tour_bar.hide()
         self.tour_btn.show()

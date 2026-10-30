@@ -383,6 +383,8 @@ QCheckBox {{ background: transparent; spacing: 8px; }}
 QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 4px; border: 1px solid {LINE}; background: {RAISED}; }}
 QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; image: url(@CHECK@); }}
 QCheckBox::indicator:focus {{ border-color: {ACCENT}; }}
+QRadioButton::indicator {{ width: 14px; height: 14px; border-radius: 8px; border: 1px solid {LINE}; background: {RAISED}; }}
+QRadioButton::indicator:checked {{ border-color: {ACCENT}; background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 {ACCENT}, stop:0.5 {ACCENT}, stop:0.56 {RAISED}, stop:1 {RAISED}); }}
 QListView::indicator, QTreeView::indicator {{ width: 16px; height: 16px; border-radius: 4px; border: 1px solid {LINE}; background: {RAISED}; }}
 QListView::indicator:checked, QTreeView::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; image: url(@CHECK@); }}
 
@@ -459,6 +461,8 @@ QLineEdit:focus, QComboBox:focus {{ border-color: {ACCENT}; }}
 QComboBox QAbstractItemView {{ background: {BG}; border: 2px solid {LINE}; selection-background-color: {BG}; selection-color: {ACCENT}; }}
 QCheckBox::indicator, QListView::indicator, QTreeView::indicator {{ border: 2px solid {LINE}; background: {BG}; }}
 QCheckBox::indicator:checked, QListView::indicator:checked, QTreeView::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
+QRadioButton::indicator {{ border-radius: 0px; border: 2px solid {LINE}; background: {BG}; }}
+QRadioButton::indicator:checked {{ border-color: {ACCENT}; background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, stop:0 {ACCENT}, stop:0.6 {ACCENT}, stop:0.62 {BG}, stop:1 {BG}); }}
 QTreeView::item:selected, QListWidget::item:selected {{ background: {BG}; color: {ACCENT}; }}
 QScrollBar:vertical {{ width: 12px; }}
 QScrollBar::handle:vertical {{ background: {LINE}; border-radius: 0px; }}

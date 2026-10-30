@@ -887,6 +887,21 @@ class Manager:
             self.lib.save()
             self._dirty = True
 
+    # ------------------------------------------------------------------- later
+    def remind_later(self, uid: str, kind: str, note: str = ""):
+        """Queue a change to make once the game's closed (works while it's running)."""
+        with self.lock:
+            item = self.lib.remind(uid, kind, note)
+            self.lib.save()
+            return item
+
+    def done_later(self, uid: str) -> bool:
+        with self.lock:
+            found = self.lib.done_later(uid)
+            if found:
+                self.lib.save()
+            return found
+
     def delete_profile(self, name: str) -> None:
         with self.lock:
             if name == self.lib.active_profile:

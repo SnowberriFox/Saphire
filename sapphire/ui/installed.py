@@ -139,6 +139,8 @@ class RowDelegate(QStyledItemDelegate):
 
         # badges (right side)
         badges = []
+        if self.page.mgr.lib.later_for(uid):
+            badges.append(("Queued for later", theme.BANNER_BG, theme.TEXT))
         if mod.update:
             badges.append(("Update ready", theme.ACCENT, theme.ON_ACCENT))
         c: ModConflicts | None = self.page.conflicts.get(uid)
@@ -280,6 +282,8 @@ class RowDelegate(QStyledItemDelegate):
             p.drawPath(tp)
         # status badges along the bottom of the image
         badges = []
+        if self.page.mgr.lib.later_for(uid):
+            badges.append(("Later", theme.BANNER_BG, theme.TEXT))
         if mod.update:
             badges.append(("Update", theme.ACCENT, theme.ON_ACCENT))
         c = self.page.conflicts.get(uid)
@@ -540,6 +544,27 @@ class DetailPanel(QScrollArea):
         meta.setWordWrap(True)
         meta.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.lay.addWidget(meta)
+        later = self.page.mgr.lib.later_for(mod.uid)
+        if later:
+            from sapphire.ui.later import describe
+            box = QFrame()
+            box.setObjectName("LaterBox")
+            box.setStyleSheet(f"#LaterBox {{ background: {theme.BANNER_BG}; border-radius: {theme.rad(6):g}px; }} "
+                              "#LaterBox QLabel { background: transparent; }")
+            bl = QHBoxLayout(box)
+            bl.setContentsMargins(10, 8, 8, 8)
+            what = QLabel(f"Queued for later: {describe(later)}")
+            what.setWordWrap(True)
+            what.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            bl.addWidget(what, 1)
+            edit = QPushButton("Edit")
+            edit.clicked.connect(lambda: self.page.remind(mod.uid))
+            bl.addWidget(edit)
+            done = QPushButton("Done")
+            done.setToolTip("Take it off the list")
+            done.clicked.connect(lambda: self.page.later_action(mod.uid, "done"))
+            bl.addWidget(done)
+            self.lay.addWidget(box)
 
         row = QHBoxLayout()
         toggle = QPushButton("Turn off" if mod.enabled else "Turn on")
@@ -578,6 +603,12 @@ class DetailPanel(QScrollArea):
                         self.show_mod(uid)
             run(self.page.mgr.gb.details, mod.model, mod.gb_id, on_done=got, on_error=lambda e: None)
         extra = QHBoxLayout()
+        if not later:
+            rl = QPushButton("Remind me later…")
+            rl.setToolTip("Queue a change for when Deadlock's closed: switch its variant, swap it for another "
+                          "mod, or get rid of it")
+            rl.clicked.connect(lambda: self.page.remind(mod.uid))
+            extra.addWidget(rl)
         if mod.audio_url and self.page.player is not None:
             from sapphire.ui.audio import PreviewButton
             extra.addWidget(PreviewButton(self.page.player, mod.audio_url))
@@ -746,11 +777,15 @@ class InstalledPage(QWidget):
     status = Signal(str)
     priority_requested = Signal()
     profile_switch_requested = Signal(str)
+    find_like_requested = Signal(str)  # uid: open Browse on mods like it
+    focus_requested = Signal()         # bring the Installed page up
 
     def __init__(self, manager, images):
         super().__init__()
         self.mgr = manager
         self.busy = lambda uid: False   # MainWindow replaces this: is a download running for the mod?
+        self.running = lambda: False    # ...and this: is Deadlock running?
+        self.later_dlg = None
         self.player = None              # shared sound-preview player, set by MainWindow
         self._audio_checked: set[str] = set()
         self.images = images
@@ -844,6 +879,19 @@ class InstalledPage(QWidget):
         actions.addWidget(all_off)
         cl.addLayout(actions)
 
+        self.later_bar = QFrame()
+        self.later_bar.setObjectName("LaterBar")
+        lb = QHBoxLayout(self.later_bar)
+        lb.setContentsMargins(12, 6, 8, 6)
+        self.later_label = QLabel()
+        lb.addWidget(self.later_label, 1)
+        self.later_btn = QPushButton("Review")
+        self.later_btn.setProperty("kind", "primary")
+        self.later_btn.clicked.connect(lambda: self.review_later())
+        lb.addWidget(self.later_btn)
+        self.later_bar.hide()
+        cl.addWidget(self.later_bar)
+
         self.hint = QLabel()
         self.hint.setObjectName("Muted")
         cl.addWidget(self.hint)
@@ -915,6 +963,7 @@ class InstalledPage(QWidget):
         self._apply_filter(self.filter.text())
         self.detail.show_mod(current if current in self.mgr.lib.members else None)
         self._fill_profiles()
+        self._sync_later()
 
     def _recount(self):
         mods = self.mgr.lib.visible()
@@ -1164,7 +1213,105 @@ class InstalledPage(QWidget):
             menu.addAction("Open on GameBanana", lambda: QDesktopServices.openUrl(QUrl(mod.url)))
         if self.mgr.can_roll_back(uid):
             menu.addAction("Roll back to the previous version", lambda: self.rollback_requested.emit(uid))
+        later = self.mgr.lib.later_for(uid)
+        menu.addAction("Edit reminder…" if later else "Remind me later…", lambda: self.remind(uid))
+        if later:
+            menu.addAction("Reminder done", lambda: self.later_action(uid, "done"))
+        menu.addSeparator()
         menu.addAction("Rename…", lambda: self.rename(uid))
         menu.addAction(f"Remove from {self.mgr.lib.active_profile}", lambda: self.remove_from_profile(uid))
         menu.addAction("Uninstall…", lambda: self.remove(uid))
         menu.exec(self.list.viewport().mapToGlobal(pos))
+
+    # ------------------------------------------------------------- later
+    def select(self, uid: str):
+        """Select a mod in the list (clearing a filter that hides it)."""
+        for i in range(self.list.count()):
+            item = self.list.item(i)
+            if item.data(ROLE_UID) == uid:
+                if item.isHidden():
+                    self.filter.clear()
+                self.list.setCurrentItem(item)
+                self.list.scrollToItem(item)
+                return
+
+    def _sync_later(self):
+        items = self.mgr.lib.later()
+        n = len(items)
+        self.later_bar.setVisible(bool(n))
+        self.later_bar.setStyleSheet(f"#LaterBar {{ background: {theme.BANNER_BG}; "
+                                     f"border-radius: {theme.rad(7):g}px; }} #LaterBar QLabel {{ background: transparent; }}")
+        if n:
+            names = ", ".join(self.mgr.lib.mods[x.uid].name for x in items[:3]) + ("…" if n > 3 else "")
+            self.later_label.setText(f"Queued for later: {n} mod{'s' if n != 1 else ''} ({names})")
+        if self.later_dlg is not None and self.later_dlg.isVisible():
+            self.later_dlg.reload(running=self.running())
+
+    def remind(self, uid: str):
+        """Add or edit a mod's reminder (works while the game's running)."""
+        from sapphire.ui.later import RemindDialog
+        mod = self.mgr.lib.mods.get(uid)
+        if not mod:
+            return
+        existing = self.mgr.lib.later_for(uid)
+        running = self.running()
+        dlg = RemindDialog(self, mod, existing, running)
+        if not dlg.exec():
+            return
+        if dlg.cleared:
+            self.mgr.done_later(uid)
+            self.status.emit(f"Took {mod.name} off the later list.")
+        else:
+            self.mgr.remind_later(uid, dlg.kind, dlg.note.text())
+            self.status.emit(f"Queued {mod.name} for later."
+                             + (" Sapphire will show the list when Deadlock closes." if running else ""))
+        self._refresh_later()
+
+    def _refresh_later(self):
+        self.list.viewport().update()
+        self.detail.show_mod(self.detail.uid)
+        self._sync_later()
+
+    def review_later(self, after_game: bool = False) -> bool:
+        """Open the queue. Returns False if there's nothing on it."""
+        from sapphire.ui.later import LaterDialog
+        if not self.mgr.lib.later():
+            return False
+        if self.later_dlg is None:
+            self.later_dlg = LaterDialog(self.window(), self.mgr)
+            self.later_dlg.act.connect(self.later_action)
+        self.later_dlg.reload(after_game=after_game, running=self.running())
+        self.later_dlg.show()
+        self.later_dlg.raise_()
+        self.later_dlg.activateWindow()
+        return True
+
+    def later_action(self, uid: str, action: str):
+        mod = self.mgr.lib.mods.get(uid)
+        if mod is None:
+            self._sync_later()
+            return
+        if action == "done":
+            self.mgr.done_later(uid)
+            self.status.emit(f"{mod.name}: done.")
+        elif action == "show":
+            self.focus_requested.emit()
+            self.select(uid)
+        elif action == "variant":
+            self.focus_requested.emit()
+            self.select(uid)
+            if len(mod.vpks) > 1:
+                self.status.emit(f"Tick the variant you want under Variants on the right, then mark "
+                                 f"{mod.name} done.")
+            elif mod.source == "gamebanana" and mod.gb_id:
+                self.refetch_requested.emit(uid)
+            else:
+                self.status.emit(f"{mod.name} is a single file with no GameBanana page, so it has no other "
+                                 "variants to switch to.")
+        elif action == "swap":
+            self.find_like_requested.emit(uid)
+        elif action == "remove_profile":
+            self.remove_from_profile(uid)     # takes the reminder with it
+        elif action == "uninstall":
+            self.remove(uid)
+        self._refresh_later()

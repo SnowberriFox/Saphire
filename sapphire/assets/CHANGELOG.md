@@ -3,6 +3,28 @@
 All notable changes to Sapphire. The in-app updater shows the newest section
 as "What's new".
 
+## 1.12.0 — 2026-10-31
+
+### Added
+- **Queued for later** (Ham's idea). In the middle of a match you can't really
+  sort your mods out, so now you can make a note and deal with it afterwards.
+  Right-click a mod (or use **Remind me later…** in its side panel) and pick:
+  change the variant, swap it for a different mod, get rid of it, or just a note,
+  plus an optional note of your own ("try the red one"). It works while Deadlock
+  is running.
+  - When Deadlock closes, Sapphire pops up the list. Each item has a button to
+    deal with it right there: **Pick a variant**, **Find a different one** (opens
+    Browse on the same category, e.g. that hero's skins), **Remove from profile**
+    or **Uninstall…**. Mark each one **Done** when you're happy.
+  - Queued mods get a "Later" badge, and a bar at the top of Installed shows the
+    list with a **Review** button any time.
+  - Each profile has its own list. Uninstalling a mod or taking it out of the
+    profile takes it off the list too.
+
+### Fixed
+- Round option buttons (like "Start empty / Start as a copy" for new profiles)
+  were hard to see in some themes.
+
 ## 1.11.0 — 2026-10-28
 
 ### Changed

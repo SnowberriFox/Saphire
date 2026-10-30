@@ -612,6 +612,54 @@ def main():
             win.switch_profile("Mine")
             print("back to Mine:", mgr.lib.active_profile, "| shown:", win.installed.list.count(),
                   "| profiles:", sorted(mgr.lib.profiles))
+            later_step()
+
+    def later_step():
+        # Ham's queue for later (1.12.0): note mods mid-match, deal with them once the game's closed
+        from sapphire.ui.later import RemindDialog
+        page = win.installed
+        steam.is_game_running = lambda *a, **k: True
+        win._tick()
+        win.go(1)
+        mods = mgr.lib.visible()
+        skin = next(m for m in mods if m.category.startswith("Skins"))
+        others = [m for m in mods if m.uid != skin.uid]
+        dlg = RemindDialog(win, skin, None, running=True)
+        dlg.radios["swap"].setChecked(True)
+        dlg.note.setText("the gold one clashes with my HUD")
+        dlg.show()
+        app.processEvents()
+        dlg.grab().save(str(OUT / "28-remind-me-later.png"))
+        mgr.remind_later(skin.uid, dlg.kind, dlg.note.text())
+        dlg.reject()
+        mgr.remind_later(others[0].uid, "variant", "try jade")
+        mgr.remind_later(others[1].uid, "remove")
+        page.reload()
+        page.select(skin.uid)
+        print("running banner:", win.banner.text()[:60], "| bar:", page.later_label.text())
+        QTimer.singleShot(500, lambda: (shot("29-queued-while-running"), closed()))
+
+        def closed():
+            steam.is_game_running = lambda *a, **k: False
+            win._tick()
+            QTimer.singleShot(2200, review)
+
+        def review():
+            d = page.later_dlg
+            print("after closing: dialog shown:", bool(d and d.isVisible()), "| rows:", len(d.rows) if d else 0,
+                  "| head:", d.head.text()[:40] if d else "")
+            d.grab().save(str(OUT / "30-later-after-game.png"))
+            page.later_action(others[1].uid, "remove_profile")
+            page.later_action(others[0].uid, "done")
+            page.later_action(skin.uid, "swap")
+            QTimer.singleShot(1200, swapped)
+
+        def swapped():
+            cur = win.browse.filters.tree.currentItem()
+            print("swap opened Browse on:", cur.text(0) if cur else None, "| for:", skin.category,
+                  "| page:", win.stack.currentIndex(), "| left:", [x.uid for x in mgr.lib.later()],
+                  "| removed still downloaded:", others[1].uid in mgr.lib.mods and others[1].uid not in mgr.lib.members)
+            shot("31-swap-browse")
             app.quit()
 
     def hero_tour():
@@ -700,7 +748,7 @@ def main():
         step()
 
     QTimer.singleShot(1500, browse)
-    QTimer.singleShot(45000, app.quit)
+    QTimer.singleShot(60000, app.quit)
     app.exec()
 
 

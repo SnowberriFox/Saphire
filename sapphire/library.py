@@ -99,12 +99,32 @@ class InstalledMod:
         return mod
 
 
+LATER_KINDS = ("variant", "swap", "remove", "note")
+
+
+@dataclass
+class Later:
+    """A reminder to change a mod once Deadlock is closed (queued mid-match)."""
+    uid: str
+    kind: str = "note"     # "variant", "swap" (find a different mod), "remove" or "note"
+    note: str = ""
+    at: int = 0
+
+    @classmethod
+    def from_dict(cls, d) -> "Later | None":
+        if not isinstance(d, dict) or not d.get("uid"):
+            return None
+        kind = d.get("kind") if d.get("kind") in LATER_KINDS else "note"
+        return cls(uid=str(d["uid"]), kind=kind, note=str(d.get("note") or ""), at=int(d.get("at") or 0))
+
+
 @dataclass
 class Profile:
     name: str
     entries: list[tuple[str, bool]] = field(default_factory=list)  # (uid, enabled) in load order
     saved_at: int = 0
     origin: str = ""   # "" = made here; otherwise the manager it was imported from
+    later: list[Later] = field(default_factory=list)   # "do this when the game's closed" reminders
 
 
 @dataclass
@@ -188,9 +208,11 @@ class Library:
             if uid not in self.order:
                 self.order.append(uid)
         for name, raw in (data.get("profiles") or {}).items():
+            later = [x for x in (Later.from_dict(d) for d in raw.get("later") or []) if x and x.uid in self.mods]
             self.profiles[name] = Profile(name=name, saved_at=raw.get("saved_at", 0),
                                           origin=str(raw.get("origin") or ""),
-                                          entries=[(u, bool(e)) for u, e in raw.get("entries", [])])
+                                          entries=[(u, bool(e)) for u, e in raw.get("entries", [])],
+                                          later=list({x.uid: x for x in later}.values()))
         self.active_profile = data.get("active_profile")
         if int(data.get("schema") or 1) < 2:
             # keep the old file next to it, just in case
@@ -224,7 +246,8 @@ class Library:
             "settings": asdict(self.settings),
             "mods": {uid: asdict(m) for uid, m in self.mods.items()},
             "order": self.order,
-            "profiles": {n: {"entries": [list(e) for e in p.entries], "saved_at": p.saved_at, "origin": p.origin}
+            "profiles": {n: {"entries": [list(e) for e in p.entries], "saved_at": p.saved_at, "origin": p.origin,
+                             "later": [asdict(x) for x in p.later]}
                          for n, p in self.profiles.items()},
             "active_profile": self.active_profile,
             "deployed": self.deployed,
@@ -315,6 +338,7 @@ class Library:
         self.members.discard(uid)
         for prof in self.profiles.values():
             prof.entries = [(u, e) for u, e in prof.entries if u != uid]
+            prof.later = [x for x in prof.later if x.uid != uid]
         self._pin()
         return mod
 
@@ -331,6 +355,9 @@ class Library:
             self.members.add(new)
         for prof in self.profiles.values():
             prof.entries = [(new if u == old else u, e) for u, e in prof.entries]
+            for x in prof.later:
+                if x.uid == old:
+                    x.uid = new
 
     def set_order(self, uids: list[str]) -> None:
         seen = list(dict.fromkeys(u for u in uids if u in self.mods))
@@ -464,6 +491,7 @@ class Library:
             self.members.discard(uid)
             self.mods[uid].enabled = False
             self._pin()
+        self.done_later(uid)     # nothing left to do with it here
 
     def profiles_with(self, uid: str) -> list[str]:
         """Names of the profiles a mod is in."""
@@ -477,6 +505,40 @@ class Library:
     def not_in_profile(self) -> list[InstalledMod]:
         """Downloaded mods the active profile doesn't have (to add them without downloading)."""
         return [self.mods[u] for u in self.order if u in self.mods and u not in self.members]
+
+    # -------------------------------------------------------------------- later
+    # Reminders you queue while Deadlock is running ("swap this variant", "get
+    # rid of this one"), kept per profile, at most one per mod.
+
+    def later(self) -> list[Later]:
+        """The active profile's reminders, oldest first."""
+        prof = self.profiles.get(self.active_profile or "")
+        if prof is None:
+            return []
+        return [x for x in prof.later if x.uid in self.members and x.uid in self.mods]
+
+    def later_for(self, uid: str) -> Later | None:
+        return next((x for x in self.later() if x.uid == uid), None)
+
+    def remind(self, uid: str, kind: str, note: str = "") -> Later:
+        """Queue (or replace) the active profile's reminder for a mod."""
+        if uid not in self.mods:
+            raise KeyError(uid)
+        prof = self.profiles[self.active_profile]
+        old = next((x for x in prof.later if x.uid == uid), None)
+        item = Later(uid=uid, kind=kind if kind in LATER_KINDS else "note", note=note.strip(),
+                     at=old.at if old else int(time.time()))
+        prof.later = [item if x.uid == uid else x for x in prof.later] if old else prof.later + [item]
+        return item
+
+    def done_later(self, uid: str) -> bool:
+        """Drop the active profile's reminder for a mod. True if there was one."""
+        prof = self.profiles.get(self.active_profile or "")
+        if prof is None:
+            return False
+        before = len(prof.later)
+        prof.later = [x for x in prof.later if x.uid != uid]
+        return len(prof.later) != before
 
     # kept for callers from before profiles were live
     def snapshot(self, name: str) -> Profile:
